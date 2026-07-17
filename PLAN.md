@@ -65,26 +65,27 @@ Remotes: `origin` = msfrox/cosmic-app-library (fork), `upstream` = pop-os.
 
 ## Phases
 
-### Phase 0 — Fork & baseline build ⬜
-Prove the build+install+run loop before any feature work.
+### Phase 0 — Fork & baseline build ✅ (build) / ⬜ (on-device verify)
 - [x] Fork public → clone to `~/Projects/cosmic-app-library`, add `upstream`.
 - [x] Branch model: `master` (upstream mirror) / `dev` (integration).
-- [ ] `just build-release` — confirm the **unmodified** fork compiles (first build
-      is long: hundreds of crates).
-- [ ] `sudo just install`, then relaunch COSMIC app library and confirm the fork
-      runs in place of the system binary. Note rollback: `sudo pacman -S cosmic-app-library`.
-- **Scope contract:** zero behavior change. Only outcome = a reproducible build/run.
+- [x] `just build-release` — unmodified fork compiles (1m22s, cache warm; 45MB bin).
+- [ ] `sudo just install` + relaunch to confirm the fork runs in place of the
+      system binary. Deferred: owner's live COSMIC session; owner to run when ready.
+      Rollback: `sudo pacman -S cosmic-app-library`.
 
-### Phase 1 — Top/bottom position (issue #336) ⬜  → upstream PR
-Branch `feat/library-position` off `master`.
-- [ ] Add a position config key (`cosmic_config`): `Auto | Top | Bottom`, default `Auto`.
-- [ ] `Auto`: derive side from the panel/dock output geometry already read in
-      `activate()`.
-- [ ] Rework `layer_padding()` + content vertical alignment to honor top vs bottom.
-- [ ] Verify against a top panel and a bottom dock; verify the manual override.
-- [ ] Open PR to pop-os referencing #336. Merge branch into `dev`.
-- **Scope contract:** position only. No UI chrome, no favorites. Keep the diff
-  minimal and upstream-friendly (no unrelated refactors).
+### Phase 1 — Top/bottom position (issue #336) ✅ (code) / ⬜ (verify + PR)
+Branch `feat/library-position` off `master`; merged into `dev`.
+- [x] `LibraryPosition` config key `Auto | Top | Bottom` (default `Auto`) on
+      `AppLibraryConfig`. Set via `~/.config/cosmic/com.system76.CosmicAppLibrary/v1/position`
+      (plain text: `Top`/`Bottom`/`Auto`).
+- [x] `Auto`: bottom only when a bottom dock exists AND no top panel (else top),
+      so default top-panel layouts are unchanged.
+- [x] `handle_overlap()` computes `bottom_margin`; `layer_padding()` + view spacer
+      branch on `effective_position()`.
+- [x] Compiles clean (only pre-existing warnings).
+- [ ] On-device verify: top panel + bottom override; and a bottom-dock-only setup.
+- [ ] Open PR to pop-os referencing #336.
+- **Scope contract:** position only. Minimal, upstream-friendly diff. ✅ held.
 
 ### Phase 2 — Header: Settings + Power ⬜
 On `dev`.
