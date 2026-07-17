@@ -15,17 +15,20 @@ Resume line: *"Continue cosmic-app-library. Read PLAN.md and HANDOFF.md in
     `Top` / `Bottom` / `Auto`). No in-app UI toggle yet.
   - src/app.rs: `bottom_margin` field, `effective_position()`, `handle_overlap()`
     bottom detection, `layer_padding()` + view spacer branch on position.
-- Nothing pushed to origin yet. Not installed to the system (owner's live session).
+- **Bottom-overlap bug FIXED & installed (5aa51ee).** The overlap sensor
+  (`cosmic_launcher_dummy` layer surface) was anchored TOP at fixed 1200x200, so
+  it never overlapped a bottom panel → `bottom_margin` stayed 0 → library dropped
+  onto the panel. Now anchored `Anchor::all()` + size `(None,None)` (fullscreen).
+  Verified on owner's desktop: 78px bottom panel → `bottom_margin=78`, library
+  floats above. Clean binary installed to `/usr/bin` via `sudo just install`.
+- Nothing pushed to origin yet.
 
 ## Next step
-1. On-device verify (owner runs — needs sudo + their live desktop):
-   `sudo just install`, then trigger the app library. Test `Bottom` override:
-   `mkdir -p ~/.config/cosmic/com.system76.CosmicAppLibrary/v1 && \
-    printf Bottom > ~/.config/cosmic/com.system76.CosmicAppLibrary/v1/position`
-   (delete the file or write `Auto` to revert). Rollback binary:
-   `sudo pacman -S cosmic-app-library`.
-2. Then Phase 2 (header: Settings + Power) on `dev`.
-3. Open the Phase 1 upstream PR (push `feat/library-position`, PR to pop-os, ref #336).
+1. Phase 2 (header: Settings + Power) on `dev`.
+2. Open the Phase 1 upstream PR (push `feat/library-position`, PR to pop-os,
+   ref #336). NOTE: the sensor-anchor fix (5aa51ee) landed on `dev`, not on
+   `feat/library-position` — cherry-pick it onto that branch before the PR, since
+   bottom detection is broken without it.
 
 ## Gotchas (stable)
 - `just install` overwrites `/usr/bin/cosmic-app-library`; pacman updates clobber
