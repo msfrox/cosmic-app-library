@@ -79,7 +79,7 @@ use cosmic::{
     widget::{
         self, Column,
         autosize::autosize,
-        button::{self, Catalog as ButtonStyleSheet},
+        button,
         divider,
         dnd_destination::dnd_destination_for_data,
         icon::{self, from_name},
@@ -1780,11 +1780,23 @@ impl cosmic::Application for CosmicAppLibrary {
                             .on_clear(Message::EditName(String::new()))
                             .on_submit(|_| Message::SubmitName)
                             .id(EDIT_GROUP_ID.clone())
-                            .width(Length::Fixed(200.0))
+                            .width(Length::Fill)
                             .size(14),
                     )
+                    .width(Length::Fill)
+                    .center_x(Length::FillPortion(8))
                 } else {
-                    container(text(cur_group.name()).size(24))
+                    container(
+                        text(cur_group.name())
+                            .size(24)
+                            .width(Length::Fill)
+                            .center()
+                            .ellipsize(cosmic::iced::core::text::Ellipsize::End(
+                                cosmic::iced::core::text::EllipsizeHeightLimit::Lines(1),
+                            )),
+                    )
+                    .width(Length::Fill)
+                    .center_x(Length::FillPortion(8))
                 },
                 row![
                     space::horizontal(),
@@ -1981,29 +1993,23 @@ impl cosmic::Application for CosmicAppLibrary {
                                 .height(Length::Fixed(group_icon_size))
                         )
                         .padding(space_xxs),
-                        text::body(group.name()).width(Length::Shrink)
+                        text::body(group.name())
+                            .width(Length::Fill)
+                            .center()
+                            .ellipsize(cosmic::iced::core::text::Ellipsize::End(
+                                cosmic::iced::core::text::EllipsizeHeightLimit::Lines(1),
+                            ))
                     ]
                     .align_x(Alignment::Center)
                     .width(Length::Fill),
                 )
                 .height(Length::Fixed(group_height))
                 .width(Length::Fixed(group_width))
-                .class(if is_active {
-                    Button::Custom {
-                        active: Box::new(|focused, theme| {
-                            theme.pressed(focused, false, &Button::IconVertical)
-                        }),
-                        disabled: Box::new(|theme| theme.disabled(&Button::IconVertical)),
-                        hovered: Box::new(|focused, theme| {
-                            theme.hovered(focused, false, &Button::IconVertical)
-                        }),
-                        pressed: Box::new(|focused, theme| {
-                            theme.pressed(focused, false, &Button::IconVertical)
-                        }),
-                    }
-                } else {
-                    Button::IconVertical
-                })
+                .class(Button::IconVertical)
+                // Use the standard cosmic selected-state styling (accent-tinted
+                // overlay + accent text) instead of forcing the low-contrast
+                // "pressed" background, which was barely visible (upstream #338).
+                .selected(is_active)
                 .padding([space_none, h_padding, space_xxs, h_padding])
                 .on_press_maybe(
                     self.menu
@@ -2030,7 +2036,12 @@ impl cosmic::Application for CosmicAppLibrary {
                         .height(Length::Fixed(group_icon_size))
                 )
                 .padding(space_xxs),
-                text::body(ADD_GROUP.as_str()).width(Length::Shrink)
+                text::body(ADD_GROUP.as_str())
+                    .width(Length::Fill)
+                    .center()
+                    .ellipsize(cosmic::iced::core::text::Ellipsize::End(
+                        cosmic::iced::core::text::EllipsizeHeightLimit::Lines(1),
+                    ))
             ]
             .align_x(Alignment::Center)
             .width(Length::Fill),

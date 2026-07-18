@@ -21,21 +21,22 @@ Resume line: *"Continue cosmic-app-library. Read PLAN.md and HANDOFF.md in
     nav after search).
   - 02e4cbf Phase 8: `keep_in_home` folders — create-dialog toggle "Also show
     apps in Home"; Home filter + add-to-Home strip loop respect the flag.
-- IN FLIGHT at session end: Sonnet agent implementing #338 (accent-color
-  selected-group highlight), #306 (group button clickable area), #235/335
-  (long-name ellipsis, re-derived from upstream draft PR #360). If its work
-  is uncommitted, check `git status` / `git diff` and finish/commit it.
+  - fixes batch: #338 accent-color selected-group highlight (standard
+    `.selected(true)` styling instead of hardcoded pressed-state) + #235/335
+    long-name ellipsis on tiles, header title, and group labels (re-derived
+    from upstream draft PR #360). #306 clickable-area SKIPPED — no dead zone
+    found in code and upstream can't reproduce it either.
 - Phase 1 upstream PR still open: pop-os/cosmic-app-library#388.
 
 ## Next step
 1. Owner on-device verify (nothing verified live yet this session):
-   power-menu outside-click, Center position + window size config keys,
+   power-menu outside-click, accent-colored selected group, long-name
+   ellipsis, Center position + window size config keys,
    favorites drag-reorder (esp. drop targets vs drag sources), keep-in-home
    folder toggle, blur bleed with frosted glass on, arrow keys after search.
    `just build-release && sudo just install` or `cd packaging && makepkg -si`.
-2. Commit/verify the in-flight fixes batch if not already committed.
-3. Open upstream PR for the #387 blur fix (rebase a master-based variant).
-4. BACKLOG candidates from research: upstream PR #378 hide/unhide apps
+2. Open upstream PR for the #387 blur fix (rebase a master-based variant).
+3. BACKLOG candidates from research: upstream PR #378 hide/unhide apps
    (conflicts with our tree, adapt manually), #153 fractional-scaling size,
    #386 XDG dedupe, #164 all-apps section, #177 icon-only mode.
 
