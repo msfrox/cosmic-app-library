@@ -99,6 +99,45 @@ Favorites searches all apps, empty-state hint.
 - [ ] Owner: on-device verify Phases 2+3, run `makepkg -si`, screenshots.
 - [ ] Watch Phase 1 PR; rebase if upstream moves.
 
+### Phase 5 — Power menu closes on outside click ✅
+One-liner: `Message::CloseContextMenu` (fires via the window-wide `mouse_area`,
+app.rs:1976) now also sets `power_menu_open = false`. Same flow the main window
+uses; backdrop clicks already closed it via `hide()`.
+
+### Phase 6 — Center position + configurable window size
+- `LibraryPosition` gets `Center` (manual-only; Auto still resolves Top/Bottom
+  from dock). `layer_padding()` (app.rs:499–510): Center = symmetric
+  `((size.height − H)/2)` top+bottom. View `positioned` match (app.rs:1977–87):
+  Center = `space Fill` above AND below.
+- Config keys `window_width`/`window_height` (f32, defaults 1200/690, clamped
+  ≥ 600×400 and ≤ screen). Replace hardcoded 690/1200 at app.rs:499–508,
+  1954–57, 1975 and anywhere else. No settings UI — config-file only for now.
+
+### Phase 7 — Reorder favorites by drag
+- Order = `config.favorites` Vec order. Bug to fix first: `filtered()`'s
+  FAVORITES branch (app_group.rs:322–28) returns global entry order — must sort
+  by position in `self.favorites`.
+- Drag-reorder: reuse existing dnd (`dnd_destination_for_data::<AppletString>`,
+  app.rs:1850, as used for drag-to-group). In favorites view each tile is also
+  a drop destination: dropping app id X on tile at index i ⇒ move X before i
+  (`Message::ReorderFavorite`). Trailing drop zone appends to end.
+
+### Phase 8 — Custom-named folders that keep apps in Home
+Groups already have custom names; what's missing is "favorites-style" =
+non-exclusive. Add `keep_in_home: bool` (serde default false) to `AppGroup`;
+create-group dialog gets a toggle. HOME's filter must exclude ONLY apps in
+groups with `keep_in_home == false` (HOME.filtered branch, app_group.rs:321).
+Old configs safe via serde default. Unlimited such folders = "multiple
+favorites".
+
+### Phase 9 — Frosted-blur bleed (upstream #387) — scoped after research
+Research agent findings recorded in HANDOFF; if the blur is compositor-side
+(cosmic-comp), the fix may not live in this repo — document + upstream instead.
+
+### Phase 10 — Upstream cherry-picks
+Adopt worthwhile open upstream PRs / implement small upstream-issue fixes per
+research-agent shortlist; keep each pick a separate commit for rebase sanity.
+
 ## Delegation plan (per playbook §5)
 - **Main thread:** Phase 1 positioning math, Phase 2 power/DBus integration,
   anything touching layer-shell/iced surfaces. Judgment-heavy on unfamiliar libcosmic.

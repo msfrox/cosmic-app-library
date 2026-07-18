@@ -1139,6 +1139,7 @@ impl cosmic::Application for CosmicAppLibrary {
             }
             Message::CloseContextMenu => {
                 self.menu = None;
+                self.power_menu_open = false;
                 return commands::popup::destroy_popup(*MENU_ID);
             }
             Message::ToggleFavorite(i) => {
