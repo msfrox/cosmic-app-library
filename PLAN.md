@@ -182,7 +182,7 @@ W11 Start), not bottom-bar groups. Phase 8's keep_in_home groups stay (harmless)
   3_000_000, EXPERIMENTAL — if nested destinations misbehave live, keep
   reorder only). FinishDrag/dnd source must no-op removal inside folder view.
 
-### Phase 12 — Favorites positional drops: between = reorder, on top = combine ⬜
+### Phase 12 — Favorites positional drops: between = reorder, on top = combine ✅ (code) / ⬜ (verify)
 Replaces the whole-tile-reorder-only favorites dnd. Each favorites app tile cell
 becomes `row![left_zone, tile, right_zone]` — three SIBLING dnd destinations (no
 nesting, no overlap, so none of the Phase 11 nested-destination risk):
@@ -200,7 +200,7 @@ nesting, no overlap, so none of the Phase 11 nested-destination risk):
   unchanged; trailing append_zone stays. Folder tiles keep whole-tile
   add-to-folder (no reorder strips — folder order = folders vec order).
 
-### Phase 13 — Grid size (rows × columns) + in-app settings page ⬜
+### Phase 13 — Grid size (rows × columns) + in-app settings page ✅ (code) / ⬜ (verify)
 Owner picked settings-page rows/columns over drag-to-resize (layer-shell drag
 resize is fragile; rows/cols is the unit the user thinks in). Config-file-only
 sizing (Phase 6 keys) is replaced by derived sizing:
