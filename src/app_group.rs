@@ -13,6 +13,7 @@ static HOME: LazyLock<AppGroup> = LazyLock::new(|| AppGroup {
     name: "cosmic-library-home".to_string(),
     icon: "user-home-symbolic".to_string(),
     filter: FilterType::None,
+    keep_in_home: false,
 });
 
 /// Sentinel group index for the built-in Favorites group. Favorites entries are
@@ -23,6 +24,7 @@ static FAVORITES: LazyLock<AppGroup> = LazyLock::new(|| AppGroup {
     name: "cosmic-favorites".to_string(),
     icon: "starred-symbolic".to_string(),
     filter: FilterType::None,
+    keep_in_home: false,
 });
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Hash)]
@@ -80,6 +82,10 @@ pub struct AppGroup {
     pub icon: String,
     pub filter: FilterType,
     // pub popup: bool,
+    /// If true, apps in this group also remain visible in Library Home
+    /// instead of being exclusively shown in this group (favorites-style).
+    #[serde(default)]
+    pub keep_in_home: bool,
 }
 
 impl PartialOrd for AppGroup {
@@ -125,7 +131,12 @@ impl AppGroup {
             .filter(|de| {
                 let mut keep_de = self.matches(de);
                 keep_de &= if input_value.is_empty() {
-                    !exceptions.iter().any(|x| x.matches(de))
+                    // Groups with `keep_in_home == true` are favorites-style:
+                    // their apps stay visible in Home instead of being
+                    // exclusively moved into the group.
+                    !exceptions
+                        .iter()
+                        .any(|x| !x.keep_in_home && x.matches(de))
                 } else {
                     de.name.to_lowercase().contains(&input_value.to_lowercase())
                         || de
@@ -243,11 +254,12 @@ impl AppLibraryConfig {
         self.favorites.iter().any(|f| f == id)
     }
 
-    pub fn add(&mut self, name: String) {
+    pub fn add(&mut self, name: String, keep_in_home: bool) {
         self.groups.push(AppGroup {
             name,
             icon: "folder-symbolic".to_string(),
             filter: FilterType::AppIds(Vec::new()),
+            keep_in_home,
         });
     }
 
@@ -309,6 +321,12 @@ impl AppLibraryConfig {
             }
         } else {
             for group in &mut self.groups {
+                // Favorites-style groups keep their apps even when the app is
+                // (re-)added to Home directly; only exclusive groups get
+                // stripped.
+                if group.keep_in_home {
+                    continue;
+                }
                 match &mut group.filter {
                     FilterType::AppIds(ids) => {
                         ids.retain(|conf_id| conf_id != id);
@@ -374,6 +392,7 @@ impl Default for AppLibraryConfig {
                         ],
                         exclude: Vec::new(),
                     },
+                    keep_in_home: false,
                 },
                 AppGroup {
                     name: "cosmic-system".to_string(),
@@ -391,6 +410,7 @@ impl Default for AppLibraryConfig {
                             "com.system76.CosmicTerm".to_string(),
                         ],
                     },
+                    keep_in_home: false,
                 },
                 AppGroup {
                     name: "cosmic-utilities".to_string(),
@@ -403,6 +423,7 @@ impl Default for AppLibraryConfig {
                             "com.system76.CosmicFiles".to_string(),
                         ],
                     },
+                    keep_in_home: false,
                 },
             ],
             position: LibraryPosition::default(),

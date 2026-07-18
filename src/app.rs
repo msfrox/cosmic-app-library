@@ -257,6 +257,7 @@ struct CosmicAppLibrary {
     locale: Option<String>,
     edit_name: Option<String>,
     new_group: Option<String>,
+    new_group_keep_in_home: bool,
     dnd_icon: Option<usize>,
     offer_group: Option<Option<usize>>,
     waiting_for_filtered: bool,
@@ -297,6 +298,7 @@ impl Default for CosmicAppLibrary {
             locale: Default::default(),
             edit_name: Default::default(),
             new_group: Default::default(),
+            new_group_keep_in_home: Default::default(),
             dnd_icon: Default::default(),
             offer_group: Default::default(),
             waiting_for_filtered: Default::default(),
@@ -591,6 +593,7 @@ enum Message {
     SubmitName,
     StartNewGroup,
     NewGroup(String),
+    NewGroupKeepInHome(bool),
     SubmitNewGroup,
     CancelNewGroup,
     LoadApps,
@@ -746,6 +749,7 @@ impl CosmicAppLibrary {
         self.entry_ids.clear();
         self.entry_icon_handles.clear();
         self.new_group = None;
+        self.new_group_keep_in_home = false;
         self.search_value.clear();
         self.edit_name = None;
         self.cur_group = None;
@@ -1107,6 +1111,7 @@ impl cosmic::Application for CosmicAppLibrary {
                     return Task::none();
                 }
                 self.new_group = Some(String::new());
+                self.new_group_keep_in_home = false;
                 return Task::batch(vec![
                     get_layer_surface(SctkLayerSurfaceSettings {
                         id: *NEW_GROUP_WINDOW_ID,
@@ -1122,12 +1127,16 @@ impl cosmic::Application for CosmicAppLibrary {
             Message::NewGroup(group_name) => {
                 self.new_group = Some(group_name);
             }
+            Message::NewGroupKeepInHome(keep_in_home) => {
+                self.new_group_keep_in_home = keep_in_home;
+            }
             Message::SubmitNewGroup => {
                 if let Some(group_name) = self.new_group.take() {
-                    self.config.add(group_name);
+                    self.config.add(group_name, self.new_group_keep_in_home);
                     self.group_keys.push(self.next_group_key);
                     self.next_group_key += 1;
                 }
+                self.new_group_keep_in_home = false;
                 if let Some(helper) = self.helper.as_ref()
                     && let Err(err) = self.config.write_entry(helper)
                 {
@@ -1137,6 +1146,7 @@ impl cosmic::Application for CosmicAppLibrary {
             }
             Message::CancelNewGroup => {
                 self.new_group = None;
+                self.new_group_keep_in_home = false;
                 return destroy_layer_surface(*NEW_GROUP_WINDOW_ID);
             }
             Message::OpenContextMenu(rect, i) => {
@@ -1622,13 +1632,21 @@ impl cosmic::Application for CosmicAppLibrary {
             let dialog = widget::dialog::dialog()
                 .title(CREATE_NEW.as_str())
                 .control(
-                    text_input("", group_name)
-                        .label(&*NEW_GROUP_PLACEHOLDER)
-                        .on_input(Message::NewGroup)
-                        .on_submit(|_| Message::SubmitNewGroup)
-                        .width(Length::Fixed(432.0))
-                        .size(14)
-                        .id(NEW_GROUP_ID.clone()),
+                    column![
+                        text_input("", group_name)
+                            .label(&*NEW_GROUP_PLACEHOLDER)
+                            .on_input(Message::NewGroup)
+                            .on_submit(|_| Message::SubmitNewGroup)
+                            .width(Length::Fixed(432.0))
+                            .size(14)
+                            .id(NEW_GROUP_ID.clone()),
+                        widget::toggler(self.new_group_keep_in_home)
+                            .label(fl!("keep-in-home"))
+                            .on_toggle(Message::NewGroupKeepInHome)
+                            .width(Length::Fixed(432.0)),
+                    ]
+                    .spacing(space_s)
+                    .width(Length::Fixed(432.0)),
                 )
                 .primary_action(
                     button::custom(text::body(SAVE.as_str()).center().width(Length::Fill))
