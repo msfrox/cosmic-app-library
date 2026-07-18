@@ -3,55 +3,59 @@
 Resume line: *"Continue cosmic-app-library. Read PLAN.md and HANDOFF.md in
 ~/Projects/cosmic-app-library and do the next step."* Start with that dir as cwd.
 
-## Current state (2026-07-18, session 2)
-- Phases 0–10 CODE-COMPLETE on `dev`, pushed to origin through 02e4cbf.
-  `cargo check` clean (only the two pre-existing unused-import warnings).
-- This session added (each its own commit):
-  - 0cfc96a power menu closes on any click outside it (CloseContextMenu also
-    resets `power_menu_open`).
-  - fe59b73 Phase 6: `LibraryPosition::Center` + `window_width`/`window_height`
-    config keys (defaults 1200×690, clamp 600×400..screen).
-  - bd929d9 Phase 9: frosted-blur bleed (upstream #387) — blur rect now matches
-    the window instead of f32::MAX. **Upstream PR candidate** (needs a
-    master-based variant with literal 1200/690).
-  - e51573b Phase 7: favorites drag-reorder (order = config vec; tiles are drop
-    targets, trailing append zone; fixed two ordering bugs incl. filter_apps
-    alphabetical re-sort).
-  - 46339fe cherry-pick upstream PR #385: stable entry widget ids (arrow-key
-    nav after search).
-  - 02e4cbf Phase 8: `keep_in_home` folders — create-dialog toggle "Also show
-    apps in Home"; Home filter + add-to-Home strip loop respect the flag.
-  - fixes batch: #338 accent-color selected-group highlight (standard
-    `.selected(true)` styling instead of hardcoded pressed-state) + #235/335
-    long-name ellipsis on tiles, header title, and group labels (re-derived
-    from upstream draft PR #360). #306 clickable-area SKIPPED — no dead zone
-    found in code and upstream can't reproduce it either.
-- Phase 1 upstream PR still open: pop-os/cosmic-app-library#388.
+## Current state (2026-07-18, session 3)
+- Phases 0–11 CODE-COMPLETE on `dev`. Session-2 regressions all fixed and
+  OWNER-VERIFIED live (dbd6a0f): favorites drag-reorder no longer deletes the
+  app (FinishDrag no-ops in favorites view); power-menu items work again
+  (close moved to a dedicated ClosePowerMenu on mouse RELEASE — closing on
+  press destroyed the buttons before their release-fired action); frosted
+  blur restored by reverting to the f32::MAX rect.
+- Phase 9 blur findings (PLAN has detail): our BlurSurface(RESERVED) request
+  never reaches the wire (surface-subsystem id remap — frost actually comes
+  from libcosmic's automatic EnableBlur); self.size can stay stuck at the
+  1920×1080 init default (Opened guard on RESERVED id) — positioning on the
+  1200-tall laptop is ~60px off. No visible bleed on cosmic-comp 1.3.0, so
+  left as-is; notes are for a future tight-region/#387 attempt.
+- Phase 11 W11-style folders implemented (Sonnet agent + index-shift fix in
+  add_to_folder): AppFolder{name,apps,in_favorites} + folders vec (serde
+  defaults, old configs safe); drop app-on-app in Home creates "Folder";
+  folder tile = 2×2 mini icons, drop-on-tile adds; click opens in-place
+  folder view (back + rename input + Ungroup button); context menu gains
+  "Remove from folder"; auto-dissolve under 2 apps; ESC closes folder view
+  first (new EscapePressed). Favorites folders exist in config but are NOT
+  creatable by drop yet (nested destination skipped — see PLAN Phase 11).
+- Upstream PR #388 CLOSED by owner → replaced by #389 (squashed single
+  commit, owner-authored, AI-disclosure + DCO, full template body). Owner
+  policy memorized: no Claude trailer on upstream PRs.
 
 ## Next step
-1. Owner on-device verify (nothing verified live yet this session):
-   power-menu outside-click, accent-colored selected group, long-name
-   ellipsis, Center position + window size config keys,
-   favorites drag-reorder (esp. drop targets vs drag sources), keep-in-home
-   folder toggle, blur bleed with frosted glass on, arrow keys after search.
-   `just build-release && sudo just install` or `cd packaging && makepkg -si`.
-2. Open upstream PR for the #387 blur fix (rebase a master-based variant).
-3. BACKLOG candidates from research: upstream PR #378 hide/unhide apps
-   (conflicts with our tree, adapt manually), #153 fractional-scaling size,
-   #386 XDG dedupe, #164 all-apps section, #177 icon-only mode.
+1. Owner: `just build-release && sudo just install`, verify folders live:
+   create (drag icon onto icon in Home), open/rename/ungroup, drop-to-add,
+   remove-from-folder menu item, auto-dissolve, ESC behavior, and that
+   favorites reorder still works alongside.
+2. Watch PR #389; rebase if upstream moves.
+3. BACKLOG: favorites drop-to-combine (needs ApplicationButton restructure or
+   position-aware on_motion drops); folder tiles in favorites ordering;
+   Phase 9 tight blur region (use core.main_window_id() + real output size);
+   upstream #378 hide/unhide adapt; #153 fractional scaling; #386 XDG dedupe.
 
 ## Gotchas (stable)
 - PKGBUILD builds from GitHub `dev` — push before `makepkg`.
 - Bare `just install` gets clobbered by pacman updates; the PKGBUILD replaces
   the official package. Rollback: `sudo pacman -S cosmic-app-library`.
-- Keep `master` = upstream mirror (synced 2026-07-18, nothing missing);
-  `feat/library-position` = PR #388 branch only.
-- cosmic-config: missing keys fall back via the manual `impl Default for
-  AppLibraryConfig` (derive get_entry starts from Self::default()); AppGroup's
-  new `keep_in_home` uses `#[serde(default)]`. Old configs safe either way.
-- Favorites = separate Vec (NOT in groups) so Home still shows them; favorites
-  DISPLAY order = vec order, and filter_apps deliberately skips its
-  alphabetical sort only in favorites view with empty search.
-- Favorites tile drag_ids offset by FAVORITE_TILE_DRAG_ID_BASE (1_000_000) to
-  avoid colliding with group-row drag ids.
+- Keep `master` = upstream mirror; `feat/library-position` = PR #389 branch
+  (force-pushed rewrite; old #388 commits unreachable).
+- cosmic-config: missing keys fall back via manual `impl Default for
+  AppLibraryConfig`; AppGroup.keep_in_home and AppFolder/folders use
+  `#[serde(default)]`. Old configs safe either way.
+- Favorites = separate Vec; DISPLAY order = vec order; filter_apps skips
+  alphabetical sort only in favorites view with empty search. Folder-view
+  entries likewise keep folder.apps order.
+- Drag-id bases: favorites tiles 1_000_000, Home tiles 2_000_000 (create
+  folder), 3_000_000 reserved (unused, skipped combine), folder tiles
+  4_000_000.
+- An app lives in ≤1 folder; add_to_folder recomputes the target index if
+  removing the app dissolves an earlier folder (index shift).
+- cosmic-session auto-respawns the installed daemon if killed; single
+  instance via DBus — a second launch just activates the first.
 - No secrets in this project.

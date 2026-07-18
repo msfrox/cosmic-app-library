@@ -38,3 +38,6 @@ favorites = Favorites
 add-favorite = Add to Favorites
 remove-favorite = Remove from Favorites
 favorites-empty = Right-click an app and select "Add to Favorites".
+folder = Folder
+ungroup-folder = Ungroup
+remove-from-folder = Remove from folder

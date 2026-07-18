@@ -75,8 +75,11 @@ Remotes: `origin` = msfrox/cosmic-app-library (fork), `upstream` = pop-os.
 
 ### Phase 1 — Top/bottom position (issue #336) ✅
 Config key `Auto|Top|Bottom`, auto-follow dock, bottom-margin overlap fix.
-PR open: https://github.com/pop-os/cosmic-app-library/pull/388 (both position
-fixes cherry-picked onto `feat/library-position`). Verified on owner's desktop.
+PR #388 closed by owner; replaced by
+https://github.com/pop-os/cosmic-app-library/pull/389 — same tree squashed to
+ONE commit, no Claude trailer, AI-disclosure + DCO sign-off in the message,
+full template checklist in the body (owner policy, see memory
+upstream-pr-style). Verified on owner's desktop.
 
 ### Phase 2 — Header: Settings + Power ✅
 Home header right of search: Settings icon (launches cosmic-settings via
@@ -130,18 +133,54 @@ groups with `keep_in_home == false` (HOME.filtered branch, app_group.rs:321).
 Old configs safe via serde default. Unlimited such folders = "multiple
 favorites".
 
-### Phase 9 — Frosted-blur bleed (upstream #387) ✅
-Root cause was in THIS repo, not cosmic-comp: `handle_overlap()` requested
-`BlurSurface` with an f32::MAX rectangle over the fullscreen layer surface.
-Fixed (bd929d9): blur rect = layer-padding origin + window size. Candidate
-for a second upstream PR (needs a master-based variant using literal 1200/690
-since window_width/height helpers are Phase 6 fork code).
+### Phase 9 — Frosted-blur bleed (upstream #387) ⚠️ REOPENED
+bd929d9 (window-sized blur rect) killed the frost on-device → reverted to the
+f32::MAX rect (dbd6a0f); bleed accepted for now. Live findings (2026-07-18):
+compositor (cosmic-comp 1.3.0) DOES support partial regions end-to-end
+(ext_background_effect_manager_v1 advertised, wl_region respected, renderer
+clips); WAYLAND_DEBUG showed OUR BlurSurface(RESERVED) request never reaches
+the wire — id likely remapped by the surface subsystem (frost actually comes
+from libcosmic's automatic EnableBlur path, full-surface MAX rect, which also
+explains the #387 bleed). Secondary bug: blur rect was computed from
+self.size = 1920x1080 while the laptop output is 1920x1200 logical (~60px
+offset; check the Size::new(1920,1080) fallback near app.rs:2257). Fix
+candidates: use core.main_window_id() as the BlurSurface id + real output
+size; verify with the kill-daemon/activate/screenshot loop.
 
 ### Phase 10 — Upstream cherry-picks ✅ (partial)
 Done: PR #385 stable entry ids (46339fe). Batch: #338 accent highlight,
 #306 clickable area, #235/335 long-name ellipsis (re-derived from draft PR
 #360). Skipped: #378 hide/unhide (conflicts, revisit), #381 translations,
 #179/66 stale. Upstream master fully synced as of 2026-07-18 — no rebase due.
+
+### Phase 11 — Windows-11-style folders (drag icon onto icon) ✅ (code) / ⬜ (verify)
+Implemented per spec below with two adaptations: Ungroup lives in the folder
+view header (not a tile context menu); the favorites nested combine
+destination was skipped (ApplicationButton's hand-rolled layout makes a
+nested icon-area drop zone a restructure — favorites folders exist in
+config/messages but aren't creatable by drop yet). ESC routes through a new
+EscapePressed message so the folder view closes before the library hides.
+Owner clarified Phase 8 intent: folders are TILES inside Home/Favorites (like
+W11 Start), not bottom-bar groups. Phase 8's keep_in_home groups stay (harmless).
+- Config (`app_group.rs`): `AppFolder { name, apps: Vec<String>, in_favorites: bool }`,
+  `folders: Vec<AppFolder>` on AppLibraryConfig, `#[serde(default)]` both. An app
+  lives in ≤1 folder (adding moves it). Home grid hides apps in home-folders
+  (favorites-folder apps stay in Home — favorites never hide from Home). Adding a
+  favorites app to a favorites-folder removes the id from the `favorites` vec.
+  Folder auto-dissolves under 2 apps (survivor returns to host view).
+- View: folder tile = same footprint as app tile; rounded "folder" container
+  with 2×2 mini-icons of first 4 apps, ellipsized name below. Folder tiles
+  prepend the grid of their host view (search empty only). Click → in-place
+  folder view (same grid infra, entries = folder apps in order) with back
+  button + name text_input (buffer, persist on submit/close); ESC = back, not
+  hide. Right-click folder tile → menu: Ungroup. Inside folder view app
+  context menu gains "Remove from folder".
+- DnD: Home tiles become drop destinations (drop A on B = create folder
+  [B, A], default name "Folder", drag_id base 2_000_000). Folder tile = drop
+  destination (add to folder, base 4_000_000). Favorites tiles keep whole-tile
+  reorder; nested inner destination on the icon area = combine (base
+  3_000_000, EXPERIMENTAL — if nested destinations misbehave live, keep
+  reorder only). FinishDrag/dnd source must no-op removal inside folder view.
 
 ## Delegation plan (per playbook §5)
 - **Main thread:** Phase 1 positioning math, Phase 2 power/DBus integration,

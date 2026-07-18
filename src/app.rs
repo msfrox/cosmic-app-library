@@ -94,7 +94,7 @@ use sctk::shell::wlr_layer;
 use serde::{Deserialize, Serialize};
 use switcheroo_control::Gpu;
 
-use crate::app_group::{AppGroup, AppLibraryConfig, FAVORITES_GROUP, LibraryPosition};
+use crate::app_group::{AppFolder, AppGroup, AppLibraryConfig, FAVORITES_GROUP, LibraryPosition};
 use crate::fl;
 use crate::power::PowerAction;
 use crate::subscriptions::desktop_files::desktop_files;
@@ -137,6 +137,22 @@ pub(crate) static MENU_AUTOSIZE_ID: LazyLock<cosmic::widget::Id> =
 /// clear of the group row's drag ids (`0..=groups.len()+1`) so the two sets
 /// never collide.
 const FAVORITE_TILE_DRAG_ID_BASE: u64 = 1_000_000;
+/// Base drag id for Home app tiles acting as folder-creation drop targets
+/// (dropping app A onto app B's Home tile creates a folder holding both).
+const HOME_TILE_DRAG_ID_BASE: u64 = 2_000_000;
+/// Base drag id for folder tiles acting as drop targets (dropping an app on
+/// a folder tile adds it to that folder).
+const FOLDER_TILE_DRAG_ID_BASE: u64 = 4_000_000;
+// 3_000_000 was reserved (per PLAN.md Phase 11) for an experimental nested
+// inner-icon-area destination on favorites tiles ("combine two favorites
+// into a folder"). Not implemented: `ApplicationButton` computes its icon's
+// bounds internally via a hand-written `Widget::layout`, so exposing just
+// that sub-region as an independent nested `dnd_destination_for_data` would
+// mean restructuring that widget's layout — a much larger, behavior-risky
+// change for an explicitly experimental feature this environment has no
+// Wayland compositor to live-test. Favorites tiles keep whole-tile reorder
+// only; favorites folders are still fully supported by the config/message
+// plumbing (`in_favorites: true`), just not reachable from this drop path.
 
 #[derive(Parser, Debug, Serialize, Deserialize, Clone)]
 #[command(author, version, about, long_about = None)]
@@ -282,6 +298,13 @@ struct CosmicAppLibrary {
     group_keys: Vec<u64>,
     next_group_key: u64,
     dummy_id: Option<window::Id>,
+    /// Index into `config.folders` of the folder currently shown in-place
+    /// (Windows-11-style folder view), or `None` when showing the normal
+    /// Home/Favorites/group grid.
+    open_folder: Option<usize>,
+    /// Editable buffer for the folder-view rename text_input, seeded from
+    /// the folder's name on open and persisted on submit/close.
+    folder_name_buffer: String,
 }
 
 impl Default for CosmicAppLibrary {
@@ -323,6 +346,8 @@ impl Default for CosmicAppLibrary {
             group_keys: Default::default(),
             next_group_key: Default::default(),
             dummy_id: None,
+            open_folder: Default::default(),
+            folder_name_buffer: Default::default(),
         }
     }
 }
@@ -584,6 +609,11 @@ enum Message {
     NextRow,
     Layer(LayerEvent, SurfaceId),
     Hide,
+    /// Raw ESC key release: closes the folder view if one is open, otherwise
+    /// hides the library. Kept distinct from `Hide` because the other `Hide`
+    /// call sites (focus loss, power actions, ...) should still hide the
+    /// whole library even while a folder is open.
+    EscapePressed,
     ActivateApp(usize, Option<usize>),
     StartCurAppFocus,
     ActivationToken(Option<String>, String, String, Option<usize>, bool),
@@ -631,6 +661,25 @@ enum Message {
     Opened(Size, SurfaceId),
     Overlap(OverlapNotifyEvent),
     Output(OutputEvent),
+    /// Open the in-place folder view for `config.folders[i]`.
+    OpenFolder(usize),
+    /// Leave the folder view, persisting a non-empty changed name.
+    CloseFolder,
+    FolderNameInput(String),
+    /// Drop of `dropped_id` onto `target_id`'s tile: create a new folder
+    /// holding both. `in_favorites` selects which view/list the new folder
+    /// belongs to.
+    CreateFolderFromDrop {
+        target_id: String,
+        dropped_id: String,
+        in_favorites: bool,
+    },
+    /// Drop of an app onto folder tile `usize`: add it to that folder.
+    AddToFolder(usize, String),
+    /// Remove an app id from the currently open folder (`open_folder`).
+    RemoveFromFolder(String),
+    /// Dissolve folder `usize`, returning its apps to the host view.
+    UngroupFolder(usize),
 }
 
 #[derive(Clone, Debug)]
@@ -661,6 +710,89 @@ impl CosmicAppLibrary {
             Some(FAVORITES_GROUP) => AppLibraryConfig::favorites_group(),
             Some(i) => &self.config.groups[i],
         }
+    }
+
+    /// A folder tile: same footprint as an `ApplicationButton` app tile
+    /// (`IconVertical`, `FillPortion(1)` width, `space_s` padding), showing a
+    /// rounded 2x2 grid of up to the folder's first four app icons plus the
+    /// ellipsized folder name below. Also a drop destination for adding
+    /// apps to the folder; clicking opens the in-place folder view.
+    fn folder_tile<'a>(&'a self, i: usize, folder: &'a AppFolder) -> Element<'a, Message> {
+        let Spacing {
+            space_xxxs,
+            space_xxs,
+            space_s,
+            ..
+        } = theme::spacing();
+
+        let mini_icon = |handle: Option<widget::icon::Handle>| -> Element<'a, Message> {
+            match handle {
+                Some(h) => h
+                    .icon()
+                    .width(Length::Fixed(26.0))
+                    .height(Length::Fixed(26.0))
+                    .into(),
+                None => space::horizontal()
+                    .width(Length::Fixed(26.0))
+                    .height(Length::Fixed(26.0))
+                    .into(),
+            }
+        };
+        let icon_at = |j: usize| {
+            folder
+                .apps
+                .get(j)
+                .and_then(|id| self.all_entries.iter().find(|e| &e.id == id))
+                .map(|e| e.icon.as_cosmic_icon())
+        };
+
+        let icon_grid = column![
+            row![mini_icon(icon_at(0)), mini_icon(icon_at(1))].spacing(space_xxxs),
+            row![mini_icon(icon_at(2)), mini_icon(icon_at(3))].spacing(space_xxxs),
+        ]
+        .spacing(space_xxxs)
+        .align_x(Alignment::Center);
+
+        let tile_content = column![
+            container(icon_grid)
+                .center(Length::Fixed(64.0))
+                .class(theme::Container::Secondary),
+            container(
+                text(folder.name.clone())
+                    .size(14.0)
+                    .width(Length::Fill)
+                    .center()
+                    .wrapping(cosmic::iced::core::text::Wrapping::WordOrGlyph)
+                    .ellipsize(cosmic::iced::core::text::Ellipsize::End(
+                        cosmic::iced::core::text::EllipsizeHeightLimit::Lines(2),
+                    )),
+            )
+            .width(Length::Fill)
+            .height(Length::Fixed(40.0))
+        ]
+        .height(Length::Fixed(120.0))
+        .spacing(space_xxs)
+        .align_x(Alignment::Center)
+        .width(Length::Fill);
+
+        let btn = button::custom(tile_content)
+            .width(Length::FillPortion(1))
+            .class(theme::Button::IconVertical)
+            .padding(space_s)
+            .on_press(Message::OpenFolder(i));
+
+        dnd_destination_for_data::<AppletString, Message>(
+            btn,
+            move |data: Option<AppletString>, _| {
+                let id = data
+                    .and_then(|data| load_desktop_file(&[], data.0))
+                    .map(|entry| entry.id)
+                    .unwrap_or_default();
+                Message::AddToFolder(i, id)
+            },
+        )
+        .drag_id(FOLDER_TILE_DRAG_ID_BASE + i as u64)
+        .into()
     }
 
     pub fn load_apps(&mut self) {
@@ -720,16 +852,41 @@ impl CosmicAppLibrary {
         let all_entries = self.all_entries.clone();
         let cur_group = self.cur_group;
         let input = self.search_value.clone();
+        // The folder view has no search bar, so it only takes over the grid
+        // when there's no active search; a non-empty `input` (shouldn't
+        // normally happen while open) falls back to the regular group view,
+        // same as every other "search escapes the current view" case below.
+        let open_folder = self.open_folder.filter(|_| input.is_empty());
         if !self.waiting_for_filtered {
             self.waiting_for_filtered = true;
             iced::Task::perform(
                 async move {
-                    let mut apps = config.filtered(cur_group, &input, &all_entries);
+                    let mut apps = if let Some(fi) = open_folder {
+                        // Folder view: entries are the folder's own apps, in
+                        // the folder's stored order.
+                        config
+                            .folders
+                            .get(fi)
+                            .map(|f| {
+                                f.apps
+                                    .iter()
+                                    .filter_map(|id| all_entries.iter().find(|e| &e.id == id))
+                                    .cloned()
+                                    .collect()
+                            })
+                            .unwrap_or_default()
+                    } else {
+                        config.filtered(cur_group, &input, &all_entries)
+                    };
                     // Favorites (with no active search) keep the user's custom
                     // `config.favorites` order instead of being alphabetized;
-                    // every other view (including searching within Favorites,
-                    // which falls back to a global search) stays alphabetical.
-                    if cur_group != Some(FAVORITES_GROUP) || !input.is_empty() {
+                    // the folder view keeps `AppFolder::apps` order the same
+                    // way. Every other view (including searching within
+                    // Favorites, which falls back to a global search) stays
+                    // alphabetical.
+                    if open_folder.is_none()
+                        && (cur_group != Some(FAVORITES_GROUP) || !input.is_empty())
+                    {
                         apps.sort_by(|a, b| a.name.cmp(&b.name));
                     }
                     (input, apps)
@@ -761,6 +918,8 @@ impl CosmicAppLibrary {
         self.search_value.clear();
         self.edit_name = None;
         self.cur_group = None;
+        self.open_folder = None;
+        self.folder_name_buffer.clear();
         self.menu = None;
         self.power_menu_open = false;
         self.group_to_delete = None;
@@ -983,6 +1142,12 @@ impl cosmic::Application for CosmicAppLibrary {
             Message::Hide => {
                 return self.hide();
             }
+            Message::EscapePressed => {
+                if self.open_folder.is_some() {
+                    return self.update(Message::CloseFolder);
+                }
+                return self.hide();
+            }
             Message::ActivateApp(i, gpu_idx) => {
                 return self.activate_app(i, gpu_idx);
             }
@@ -1021,6 +1186,8 @@ impl cosmic::Application for CosmicAppLibrary {
                 self.edit_name = None;
                 self.search_value.clear();
                 self.cur_group = group;
+                self.open_folder = None;
+                self.folder_name_buffer.clear();
                 self.scroll_offset = 0.0;
                 self.scrollable_id = Id::new(format!("group-{group:?}"));
                 let mut cmds = vec![self.filter_apps()];
@@ -1308,8 +1475,10 @@ impl cosmic::Application for CosmicAppLibrary {
                 // In the Favorites view a finished drag is a reorder — the tile
                 // drop targets already handled it via ReorderFavorite. The
                 // "moved to a group" removal below must not run there, or the
-                // favorite is deleted right after it was reordered.
-                if self.cur_group == Some(FAVORITES_GROUP) {
+                // favorite is deleted right after it was reordered. Same for
+                // the folder view: its drop targets (add/remove-from-folder)
+                // already handled the drag, and it isn't backed by a group.
+                if self.cur_group == Some(FAVORITES_GROUP) || self.open_folder.is_some() {
                     self.dnd_icon = None;
                 } else if !copy
                     && let Some(info) = self
@@ -1363,6 +1532,97 @@ impl cosmic::Application for CosmicAppLibrary {
                 }
                 .min(favorites.len());
                 favorites.insert(index, id);
+                if let Some(helper) = self.helper.as_ref()
+                    && let Err(err) = self.config.write_entry(helper)
+                {
+                    error!("{:?}", err);
+                }
+                return self.filter_apps();
+            }
+            Message::OpenFolder(i) => {
+                self.menu = None;
+                let Some(folder) = self.config.folders.get(i) else {
+                    return Task::none();
+                };
+                self.folder_name_buffer = folder.name.clone();
+                self.open_folder = Some(i);
+                self.search_value.clear();
+                return self.filter_apps();
+            }
+            Message::CloseFolder => {
+                if let Some(i) = self.open_folder.take() {
+                    let name = std::mem::take(&mut self.folder_name_buffer);
+                    if !name.is_empty()
+                        && self.config.folders.get(i).is_some_and(|f| f.name != name)
+                    {
+                        self.config.rename_folder(i, name);
+                        if let Some(helper) = self.helper.as_ref()
+                            && let Err(err) = self.config.write_entry(helper)
+                        {
+                            error!("{:?}", err);
+                        }
+                    }
+                    return self.filter_apps();
+                }
+            }
+            Message::FolderNameInput(name) => {
+                self.folder_name_buffer = name;
+            }
+            Message::CreateFolderFromDrop {
+                target_id,
+                dropped_id,
+                in_favorites,
+            } => {
+                // Ignore unresolved drops and no-op self-drops (dropping an
+                // app onto itself).
+                if target_id.is_empty() || dropped_id.is_empty() || target_id == dropped_id {
+                    return Task::none();
+                }
+                self.config
+                    .create_folder_from_drop(&target_id, &dropped_id, in_favorites);
+                if let Some(helper) = self.helper.as_ref()
+                    && let Err(err) = self.config.write_entry(helper)
+                {
+                    error!("{:?}", err);
+                }
+                return self.filter_apps();
+            }
+            Message::AddToFolder(i, id) => {
+                if id.is_empty() {
+                    return Task::none();
+                }
+                self.config.add_to_folder(i, &id);
+                if let Some(helper) = self.helper.as_ref()
+                    && let Err(err) = self.config.write_entry(helper)
+                {
+                    error!("{:?}", err);
+                }
+                return self.filter_apps();
+            }
+            Message::RemoveFromFolder(id) => {
+                if id.is_empty() {
+                    return Task::none();
+                }
+                if let Some(i) = self.open_folder {
+                    let dissolved = self.config.remove_from_folder(i, &id);
+                    if dissolved {
+                        self.open_folder = None;
+                    }
+                    if let Some(helper) = self.helper.as_ref()
+                        && let Err(err) = self.config.write_entry(helper)
+                    {
+                        error!("{:?}", err);
+                    }
+                    return self.filter_apps();
+                }
+            }
+            Message::UngroupFolder(i) => {
+                self.config.ungroup_folder(i);
+                // The "Ungroup" action only appears in the folder view's own
+                // header (see `top_row`), so `open_folder` is exactly
+                // `Some(i)` here — the folder it names no longer exists, so
+                // leave the folder view.
+                self.open_folder = None;
                 if let Some(helper) = self.helper.as_ref()
                     && let Err(err) = self.config.write_entry(helper)
                 {
@@ -1630,6 +1890,15 @@ impl cosmic::Application for CosmicAppLibrary {
                 );
             }
 
+            if self.open_folder.is_some() {
+                list_column.push(divider::horizontal::light().into());
+                list_column.push(
+                    menu_button(text::body(fl!("remove-from-folder")))
+                        .on_press(Message::RemoveFromFolder(menu.id.clone()))
+                        .into(),
+                );
+            }
+
             return autosize(
                 container(scrollable(MenuColumn::with_children(list_column))).padding(1),
                 MENU_AUTOSIZE_ID.clone(),
@@ -1707,7 +1976,48 @@ impl cosmic::Application for CosmicAppLibrary {
 
         let cur_group = self.current_group();
         let favorites_view = self.cur_group == Some(FAVORITES_GROUP);
-        let top_row = if self.cur_group.is_none() || favorites_view {
+        let folder_view = self.open_folder.is_some();
+        let top_row = if let Some(open_folder_idx) = self.open_folder {
+            let folder_name = self
+                .config
+                .folders
+                .get(open_folder_idx)
+                .map(|f| f.name.clone())
+                .unwrap_or_default();
+            row![
+                container(
+                    button::custom(
+                        icon::icon(from_name("go-previous-symbolic").into())
+                            .width(Length::Fixed(32.0))
+                            .height(Length::Fixed(32.0)),
+                    )
+                    .padding(space_xs)
+                    .class(Button::Icon)
+                    .on_press(Message::CloseFolder)
+                )
+                .height(Length::Fixed(96.0))
+                .align_y(Vertical::Center)
+                .width(Length::FillPortion(1)),
+                container(
+                    text_input(folder_name, &self.folder_name_buffer)
+                        .on_input(Message::FolderNameInput)
+                        .on_paste(Message::FolderNameInput)
+                        .on_submit(|_| Message::CloseFolder)
+                        .width(Length::Fixed(300.0))
+                        .size(14),
+                )
+                .width(Length::Fill)
+                .center_x(Length::FillPortion(8)),
+                row![
+                    space::horizontal(),
+                    button::text(fl!("ungroup-folder"))
+                        .on_press(Message::UngroupFolder(open_folder_idx)),
+                ]
+                .width(Length::FillPortion(1))
+            ]
+            .padding([0, space_l])
+            .align_y(Alignment::Center)
+        } else if self.cur_group.is_none() || favorites_view {
             let settings_button = tooltip(
                 button::custom(
                     icon::icon(from_name("preferences-system-symbolic").into())
@@ -1885,8 +2195,27 @@ impl cosmic::Application for CosmicAppLibrary {
             )
         });
 
+        // Folder tiles prepend the grid of their host view (Home or
+        // Favorites), search empty only, and never inside the folder view
+        // itself (folders don't nest).
+        let show_folder_tiles = self.search_value.is_empty()
+            && !folder_view
+            && (self.cur_group.is_none() || favorites_view);
+        let folder_tiles: Vec<Element<'_, Message>> = if show_folder_tiles {
+            self.config
+                .folders
+                .iter()
+                .enumerate()
+                .filter(|(_, f)| f.in_favorites == favorites_view)
+                .map(|(i, f)| self.folder_tile(i, f))
+                .collect()
+        } else {
+            Vec::new()
+        };
+        let has_folder_tiles = !folder_tiles.is_empty();
+
         // TODO grid widget in libcosmic
-        let app_grid_list: Vec<_> = self
+        let app_tiles = self
             .entry_path_input
             .iter()
             .zip(self.entry_ids.iter())
@@ -1943,10 +2272,35 @@ impl cosmic::Application for CosmicAppLibrary {
                     )
                     .drag_id(FAVORITE_TILE_DRAG_ID_BASE + i as u64)
                     .into()
+                } else if self.cur_group.is_none() && !folder_view {
+                    // Each Home tile also acts as a folder-creation drop
+                    // target: dropping another app here bundles both into a
+                    // new folder `[this tile's app, dropped app]`.
+                    let target_id = entry.id.clone();
+                    dnd_destination_for_data::<AppletString, Message>(
+                        b,
+                        move |data: Option<AppletString>, _| {
+                            let dropped_id = data
+                                .and_then(|data| load_desktop_file(&[], data.0))
+                                .map(|entry| entry.id)
+                                .unwrap_or_default();
+                            Message::CreateFolderFromDrop {
+                                target_id: target_id.clone(),
+                                dropped_id,
+                                in_favorites: false,
+                            }
+                        },
+                    )
+                    .drag_id(HOME_TILE_DRAG_ID_BASE + i as u64)
+                    .into()
                 } else {
                     b.into()
                 }
-            })
+            });
+
+        let app_grid_list: Vec<_> = folder_tiles
+            .into_iter()
+            .chain(app_tiles)
             .chain(append_zone)
             .chunks(7)
             .into_iter()
@@ -1967,6 +2321,7 @@ impl cosmic::Application for CosmicAppLibrary {
         let app_scrollable = if favorites_view
             && self.entry_path_input.is_empty()
             && self.search_value.is_empty()
+            && !has_folder_tiles
         {
             container(text::body(fl!("favorites-empty")))
                 .center_x(Length::Fill)
@@ -2175,7 +2530,7 @@ impl cosmic::Application for CosmicAppLibrary {
                     key: Key::Named(Named::Escape),
                     modifiers: _mods,
                     ..
-                }) => Some(Message::Hide),
+                }) => Some(Message::EscapePressed),
                 cosmic::iced::Event::Mouse(iced::mouse::Event::ButtonPressed(_))
                     if id == SurfaceId::RESERVED =>
                 {

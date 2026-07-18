@@ -20,6 +20,22 @@ static HOME: LazyLock<AppGroup> = LazyLock::new(|| AppGroup {
 /// stored separately from `groups` so favorited apps still appear in Home.
 pub const FAVORITES_GROUP: usize = usize::MAX;
 
+/// A Windows-11-style folder: a small tile grouping a handful of apps inside
+/// Home or Favorites, shown in place of the individual app tiles. Unlike
+/// `AppGroup`, folders are not a separate view reached from the bottom bar —
+/// they render inline in whichever view they belong to.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Hash, Default)]
+pub struct AppFolder {
+    pub name: String,
+    pub apps: Vec<String>,
+    /// If true, this folder lives in Favorites (its apps are excluded from
+    /// `AppLibraryConfig::favorites` while inside it, and are returned to
+    /// `favorites` if the folder dissolves). If false, it lives in Home
+    /// (its apps are hidden from the Home grid while inside it).
+    #[serde(default)]
+    pub in_favorites: bool,
+}
+
 static FAVORITES: LazyLock<AppGroup> = LazyLock::new(|| AppGroup {
     name: "cosmic-favorites".to_string(),
     icon: "starred-symbolic".to_string(),
@@ -223,6 +239,9 @@ pub struct AppLibraryConfig {
     /// Height of the app library window, in logical pixels.
     #[serde(default = "default_window_height")]
     pub window_height: f32,
+    /// Windows-11-style folders shown inline in Home/Favorites.
+    #[serde(default)]
+    pub folders: Vec<AppFolder>,
 }
 
 fn default_window_width() -> f32 {
@@ -345,6 +364,120 @@ impl AppLibraryConfig {
         }
     }
 
+    /// Index of the folder currently containing `id`, if any. An app lives
+    /// in at most one folder.
+    pub fn folder_containing(&self, id: &str) -> Option<usize> {
+        self.folders
+            .iter()
+            .position(|f| f.apps.iter().any(|a| a == id))
+    }
+
+    /// Remove `id` from whichever folder currently holds it (auto-dissolving
+    /// that folder if it drops under 2 apps). No-op if `id` isn't in a
+    /// folder. Used before inserting `id` elsewhere so it lives in ≤1 folder.
+    fn take_from_any_folder(&mut self, id: &str) {
+        if let Some(i) = self.folder_containing(id) {
+            self.remove_from_folder(i, id);
+        }
+    }
+
+    /// Create a new folder containing `target_id` and `dropped_id` (in that
+    /// order), taking both out of any folder/favorites they were already in.
+    /// Returns the new folder's index.
+    pub fn create_folder_from_drop(
+        &mut self,
+        target_id: &str,
+        dropped_id: &str,
+        in_favorites: bool,
+    ) -> usize {
+        self.take_from_any_folder(target_id);
+        self.take_from_any_folder(dropped_id);
+        if in_favorites {
+            self.favorites.retain(|f| f != target_id && f != dropped_id);
+        }
+        self.folders.push(AppFolder {
+            name: fl!("folder"),
+            apps: vec![target_id.to_string(), dropped_id.to_string()],
+            in_favorites,
+        });
+        self.folders.len() - 1
+    }
+
+    /// Add `id` to folder `i`, first removing it from any other folder it
+    /// was in. If the folder is favorites-style, `id` is also dropped from
+    /// `favorites` — it's now represented by the folder tile instead.
+    pub fn add_to_folder(&mut self, i: usize, id: &str) {
+        let Some(folder) = self.folders.get(i) else {
+            return;
+        };
+        if folder.apps.iter().any(|a| a == id) {
+            return;
+        }
+        let in_favorites = folder.in_favorites;
+        // Taking `id` out of its old folder can dissolve that folder, which
+        // shifts every folder index after it left by one — including the
+        // target's.
+        let mut i = i;
+        if let Some(j) = self.folder_containing(id)
+            && self.remove_from_folder(j, id)
+            && j < i
+        {
+            i -= 1;
+        }
+        if in_favorites {
+            self.favorites.retain(|f| f != id);
+        }
+        if let Some(folder) = self.folders.get_mut(i) {
+            folder.apps.push(id.to_string());
+        }
+    }
+
+    /// Remove `id` from folder `i`. If this drops the folder under 2 apps it
+    /// dissolves: the survivor (if any) returns to its host view, rejoining
+    /// `favorites` if the folder was favorites-style. Returns `true` if the
+    /// folder was dissolved.
+    pub fn remove_from_folder(&mut self, i: usize, id: &str) -> bool {
+        let Some(folder) = self.folders.get_mut(i) else {
+            return false;
+        };
+        folder.apps.retain(|a| a != id);
+        if folder.apps.len() >= 2 {
+            return false;
+        }
+        let folder = self.folders.remove(i);
+        if folder.in_favorites {
+            for survivor in folder.apps {
+                if !self.favorites.iter().any(|f| f == &survivor) {
+                    self.favorites.push(survivor);
+                }
+            }
+        }
+        true
+    }
+
+    /// Rename folder `i`.
+    pub fn rename_folder(&mut self, i: usize, name: String) {
+        if let Some(folder) = self.folders.get_mut(i) {
+            folder.name = name;
+        }
+    }
+
+    /// Dissolve folder `i` outright, returning all its apps to the host view
+    /// (rejoining `favorites` if it was favorites-style).
+    pub fn ungroup_folder(&mut self, i: usize) {
+        if i >= self.folders.len() {
+            return;
+        }
+        let folder = self.folders.remove(i);
+        if folder.in_favorites {
+            for id in folder.apps {
+                if !self.favorites.iter().any(|f| f == &id) {
+                    self.favorites.push(id);
+                }
+            }
+        }
+    }
+
     pub fn filtered(
         &self,
         group: Option<usize>,
@@ -352,7 +485,22 @@ impl AppLibraryConfig {
         entries: &[Arc<DesktopEntryData>],
     ) -> Vec<Arc<DesktopEntryData>> {
         match group {
-            None => HOME.filtered(input_value, &self.groups, entries),
+            None => {
+                let mut result = HOME.filtered(input_value, &self.groups, entries);
+                if input_value.is_empty() {
+                    // Apps inside a Home folder (`in_favorites == false`) are
+                    // shown via the folder tile instead of individually.
+                    // Favorites-folder apps are left alone here — favorites
+                    // never hide from Home.
+                    result.retain(|de| {
+                        !self
+                            .folders
+                            .iter()
+                            .any(|f| !f.in_favorites && f.apps.iter().any(|a| a == &de.id))
+                    });
+                }
+                result
+            }
             Some(FAVORITES_GROUP) => {
                 if input_value.is_empty() {
                     // Order by position in `self.favorites`, not global entry order.
@@ -430,6 +578,7 @@ impl Default for AppLibraryConfig {
             favorites: Vec::new(),
             window_width: default_window_width(),
             window_height: default_window_height(),
+            folders: Vec::new(),
         }
     }
 }
