@@ -143,16 +143,13 @@ const HOME_TILE_DRAG_ID_BASE: u64 = 2_000_000;
 /// Base drag id for folder tiles acting as drop targets (dropping an app on
 /// a folder tile adds it to that folder).
 const FOLDER_TILE_DRAG_ID_BASE: u64 = 4_000_000;
-// 3_000_000 was reserved (per PLAN.md Phase 11) for an experimental nested
-// inner-icon-area destination on favorites tiles ("combine two favorites
-// into a folder"). Not implemented: `ApplicationButton` computes its icon's
-// bounds internally via a hand-written `Widget::layout`, so exposing just
-// that sub-region as an independent nested `dnd_destination_for_data` would
-// mean restructuring that widget's layout — a much larger, behavior-risky
-// change for an explicitly experimental feature this environment has no
-// Wayland compositor to live-test. Favorites tiles keep whole-tile reorder
-// only; favorites folders are still fully supported by the config/message
-// plumbing (`in_favorites: true`), just not reachable from this drop path.
+/// Base drag id for the narrow reorder strips flanking each favorites tile
+/// (left strip = `base + 2i`, right strip = `base + 2i + 1`). Dropping on a
+/// strip inserts the dragged app before/after the tile; dropping on the tile
+/// itself combines both into a favorites folder. Three SIBLING destinations
+/// per cell — never nested, so none of the nested-destination fragility that
+/// blocked this in Phase 11.
+const FAV_STRIP_DRAG_ID_BASE: u64 = 3_000_000;
 
 #[derive(Parser, Debug, Serialize, Deserialize, Clone)]
 #[command(author, version, about, long_about = None)]
@@ -305,6 +302,9 @@ struct CosmicAppLibrary {
     /// Editable buffer for the folder-view rename text_input, seeded from
     /// the folder's name on open and persisted on submit/close.
     folder_name_buffer: String,
+    /// Favorites drop zone a drag currently hovers `(tile index, zone)`;
+    /// renders the insertion bar / combine highlight while dragging.
+    fav_drop_hint: Option<(usize, FavDropZone)>,
 }
 
 impl Default for CosmicAppLibrary {
@@ -348,6 +348,7 @@ impl Default for CosmicAppLibrary {
             dummy_id: None,
             open_folder: Default::default(),
             folder_name_buffer: Default::default(),
+            fav_drop_hint: Default::default(),
         }
     }
 }
@@ -591,6 +592,16 @@ impl CosmicAppLibrary {
     }
 }
 
+/// Which part of a favorites tile a drag is currently hovering: the narrow
+/// strip before/after the icon (insert-reorder) or the icon area itself
+/// (combine into a favorites folder). Drives the drop-intent hover hint.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum FavDropZone {
+    Before,
+    Onto,
+    After,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 enum GroupRowKey {
     Home,
@@ -647,6 +658,8 @@ enum Message {
     StartDrag(usize),
     FinishDrag(bool),
     CancelDrag,
+    FavDragEnter(usize, FavDropZone),
+    FavDragLeave(usize, FavDropZone),
     StartDndOffer(Option<usize>),
     FinishDndOffer(Option<usize>, Option<DesktopEntryData>),
     LeaveDndOffer(Option<usize>),
@@ -923,6 +936,7 @@ impl CosmicAppLibrary {
         self.menu = None;
         self.power_menu_open = false;
         self.group_to_delete = None;
+        self.fav_drop_hint = None;
         self.scroll_offset = 0.0;
         self.surface_state = SurfaceState::Hidden;
         self.hand_over.clear();
@@ -1472,6 +1486,7 @@ impl cosmic::Application for CosmicAppLibrary {
                 self.dnd_icon = Some(i);
             }
             Message::FinishDrag(copy) => {
+                self.fav_drop_hint = None;
                 // In the Favorites view a finished drag is a reorder — the tile
                 // drop targets already handled it via ReorderFavorite. The
                 // "moved to a group" removal below must not run there, or the
@@ -1497,6 +1512,17 @@ impl cosmic::Application for CosmicAppLibrary {
             }
             Message::CancelDrag => {
                 self.dnd_icon = None;
+                self.fav_drop_hint = None;
+            }
+            Message::FavDragEnter(i, zone) => {
+                self.fav_drop_hint = Some((i, zone));
+            }
+            Message::FavDragLeave(i, zone) => {
+                // Leave events can arrive after the enter for the next zone
+                // (zones are adjacent), so only clear our own hint.
+                if self.fav_drop_hint == Some((i, zone)) {
+                    self.fav_drop_hint = None;
+                }
             }
             Message::StartDndOffer(group) => {
                 self.offer_group = Some(group);
@@ -1517,6 +1543,7 @@ impl cosmic::Application for CosmicAppLibrary {
                 self.offer_group = self.offer_group.filter(|g| *g != group);
             }
             Message::ReorderFavorite(id, index) => {
+                self.fav_drop_hint = None;
                 if id.is_empty() {
                     // Drag payload couldn't be resolved to a desktop entry; ignore.
                     return Task::none();
@@ -1573,6 +1600,7 @@ impl cosmic::Application for CosmicAppLibrary {
                 dropped_id,
                 in_favorites,
             } => {
+                self.fav_drop_hint = None;
                 // Ignore unresolved drops and no-op self-drops (dropping an
                 // app onto itself).
                 if target_id.is_empty() || dropped_id.is_empty() || target_id == dropped_id {
@@ -2234,6 +2262,11 @@ impl cosmic::Application for CosmicAppLibrary {
                     .as_ref()
                     .and_then(|path| self.duplicates.get(path));
                 let selected = self.menu.is_some_and(|m| m == i);
+                // While a drag hovers this tile's icon area in favorites,
+                // light it up with the accent selected style — the "release
+                // here combines these into a folder" hint.
+                let combine_hint =
+                    favorites_view && self.fav_drop_hint == Some((i, FavDropZone::Onto));
 
                 let b = ApplicationButton::new(
                     id.clone(),
@@ -2250,27 +2283,93 @@ impl cosmic::Application for CosmicAppLibrary {
                     },
                     // TODO add icon and text if duplicated
                     dup,
-                    selected,
+                    selected || combine_hint,
                     self.menu.is_none().then_some(Message::StartDrag(i)),
                     self.menu.is_none().then_some(Message::FinishDrag(false)),
                     self.menu.is_none().then_some(Message::CancelDrag),
                 );
 
                 if favorites_view {
-                    // Each favorite tile also acts as a reorder drop target: any
-                    // dropped app id (favorite or not) is inserted before this
-                    // tile's position.
-                    dnd_destination_for_data::<AppletString, Message>(
+                    // Positional drops: the narrow strips flanking the tile
+                    // insert-reorder the dragged app before/after it, while
+                    // the tile's own area combines both apps into a favorites
+                    // folder. Three SIBLING destinations per cell — never
+                    // nested, so hit-testing stays unambiguous.
+                    let cell_height = 120.0 + 2.0 * space_s as f32;
+                    let strip = |zone: FavDropZone| -> Element<'a, Message> {
+                        let active = self.fav_drop_hint == Some((i, zone));
+                        let bar: Element<'a, Message> = if active {
+                            // Accent insertion bar: "release here reorders".
+                            container(space::vertical())
+                                .width(Length::Fixed(4.0))
+                                .height(Length::Fixed(104.0))
+                                .class(theme::Container::Custom(Box::new(|theme| {
+                                    let t = theme.cosmic();
+                                    container::Style {
+                                        background: Some(
+                                            Color::from(t.accent_color()).into(),
+                                        ),
+                                        border: Border {
+                                            radius: 2.0.into(),
+                                            ..Default::default()
+                                        },
+                                        ..Default::default()
+                                    }
+                                })))
+                                .into()
+                        } else {
+                            space::horizontal().width(Length::Fixed(4.0)).into()
+                        };
+                        container(bar)
+                            .center_x(Length::Fixed(24.0))
+                            .center_y(Length::Fixed(cell_height))
+                            .into()
+                    };
+                    let reorder_zone = |element: Element<'a, Message>,
+                                        insert_at: usize,
+                                        zone: FavDropZone| {
+                        dnd_destination_for_data::<AppletString, Message>(
+                            element,
+                            move |data: Option<AppletString>, _| {
+                                let id = data
+                                    .and_then(|data| load_desktop_file(&[], data.0))
+                                    .map(|entry| entry.id)
+                                    .unwrap_or_default();
+                                Message::ReorderFavorite(id, insert_at)
+                            },
+                        )
+                        .drag_id(
+                            FAV_STRIP_DRAG_ID_BASE
+                                + 2 * i as u64
+                                + u64::from(zone == FavDropZone::After),
+                        )
+                        .on_enter(move |_, _, _| Message::FavDragEnter(i, zone))
+                        .on_leave(move || Message::FavDragLeave(i, zone))
+                    };
+                    let target_id = entry.id.clone();
+                    let combine = dnd_destination_for_data::<AppletString, Message>(
                         b,
                         move |data: Option<AppletString>, _| {
-                            let id = data
+                            let dropped_id = data
                                 .and_then(|data| load_desktop_file(&[], data.0))
                                 .map(|entry| entry.id)
                                 .unwrap_or_default();
-                            Message::ReorderFavorite(id, i)
+                            Message::CreateFolderFromDrop {
+                                target_id: target_id.clone(),
+                                dropped_id,
+                                in_favorites: true,
+                            }
                         },
                     )
                     .drag_id(FAVORITE_TILE_DRAG_ID_BASE + i as u64)
+                    .on_enter(move |_, _, _| Message::FavDragEnter(i, FavDropZone::Onto))
+                    .on_leave(move || Message::FavDragLeave(i, FavDropZone::Onto));
+                    row![
+                        reorder_zone(strip(FavDropZone::Before), i, FavDropZone::Before),
+                        combine,
+                        reorder_zone(strip(FavDropZone::After), i + 1, FavDropZone::After),
+                    ]
+                    .width(Length::FillPortion(1))
                     .into()
                 } else if self.cur_group.is_none() && !folder_view {
                     // Each Home tile also acts as a folder-creation drop

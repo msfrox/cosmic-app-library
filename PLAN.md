@@ -182,6 +182,45 @@ W11 Start), not bottom-bar groups. Phase 8's keep_in_home groups stay (harmless)
   3_000_000, EXPERIMENTAL — if nested destinations misbehave live, keep
   reorder only). FinishDrag/dnd source must no-op removal inside folder view.
 
+### Phase 12 — Favorites positional drops: between = reorder, on top = combine ⬜
+Replaces the whole-tile-reorder-only favorites dnd. Each favorites app tile cell
+becomes `row![left_zone, tile, right_zone]` — three SIBLING dnd destinations (no
+nesting, no overlap, so none of the Phase 11 nested-destination risk):
+- Zones: `Fixed(24)` wide × `Fixed(120)` tall. Left zone drop ⇒
+  `ReorderFavorite(id, i)`; right zone ⇒ `ReorderFavorite(id, i+1)`; tile center
+  drop ⇒ `CreateFolderFromDrop { target, dropped, in_favorites: true }` (config
+  plumbing already handles favorites-vec removal + dissolve/rejoin).
+- Drag ids: left `3_000_000 + 2i`, right `3_000_000 + 2i + 1` (base finally
+  used); tile keeps `FAVORITE_TILE_DRAG_ID_BASE + i`.
+- Hover hints via `fav_drop_hint: Option<(usize, FavDropZone)>` state set by
+  `on_enter`/cleared by `on_leave` (+ FinishDrag/CancelDrag/Hide): active strip
+  renders a 4px accent vertical insertion bar; active tile center renders the
+  accent selected style (reuses ApplicationButton `selected`).
+- The wrapping row keeps `FillPortion(1)` so the 7-column grid layout is
+  unchanged; trailing append_zone stays. Folder tiles keep whole-tile
+  add-to-folder (no reorder strips — folder order = folders vec order).
+
+### Phase 13 — Grid size (rows × columns) + in-app settings page ⬜
+Owner picked settings-page rows/columns over drag-to-resize (layer-shell drag
+resize is fragile; rows/cols is the unit the user thinks in). Config-file-only
+sizing (Phase 6 keys) is replaced by derived sizing:
+- Config: `grid_columns: u32` (default 7, clamp 4..=12), `grid_rows: u32`
+  (default 3, clamp 2..=8), both `#[serde(default)]`-style fns. REMOVE
+  `window_width`/`window_height` fields (stale per-field config keys are simply
+  ignored; defaults reproduce today's exact 1200×690/444 sizes).
+- Derived: `window_width() = cols·160 + 80`, `window_height() = rows·148 + 246`,
+  `grid_max_height() = rows·148` (replaces both `max_height(444.0)` call
+  sites); `chunks(7)` → `chunks(grid_columns)`. Screen-size clamps stay.
+- Settings page: in-place view (like folder view) — `settings_view: bool`,
+  opened by a new header icon button (emblem-system-symbolic, tooltip
+  "Library Settings") next to the cosmic-settings launcher. Content: back
+  button + title; Position dropdown (Auto/Top/Bottom/Center); Columns and
+  Rows rows with −/value/+ buttons. Every change writes config AND pushes
+  `set_padding(RESERVED, layer_padding())` so position/size apply live.
+  ESC priority: settings → folder → hide.
+- i18n (en): library-settings, position, position-auto/top/bottom/center,
+  grid-columns, grid-rows.
+
 ## Delegation plan (per playbook §5)
 - **Main thread:** Phase 1 positioning math, Phase 2 power/DBus integration,
   anything touching layer-shell/iced surfaces. Judgment-heavy on unfamiliar libcosmic.
