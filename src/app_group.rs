@@ -337,9 +337,10 @@ impl AppLibraryConfig {
             None => HOME.filtered(input_value, &self.groups, entries),
             Some(FAVORITES_GROUP) => {
                 if input_value.is_empty() {
-                    entries
+                    // Order by position in `self.favorites`, not global entry order.
+                    self.favorites
                         .iter()
-                        .filter(|e| self.is_favorite(&e.id))
+                        .filter_map(|fav_id| entries.iter().find(|e| &e.id == fav_id))
                         .cloned()
                         .collect()
                 } else {

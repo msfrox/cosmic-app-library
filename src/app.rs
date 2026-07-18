@@ -133,6 +133,11 @@ pub(crate) static MENU_ID: LazyLock<SurfaceId> = LazyLock::new(SurfaceId::unique
 pub(crate) static MENU_AUTOSIZE_ID: LazyLock<cosmic::widget::Id> =
     LazyLock::new(cosmic::widget::Id::unique);
 
+/// Base drag id for per-tile favorites-reorder dnd destinations, offset well
+/// clear of the group row's drag ids (`0..=groups.len()+1`) so the two sets
+/// never collide.
+const FAVORITE_TILE_DRAG_ID_BASE: u64 = 1_000_000;
+
 #[derive(Parser, Debug, Serialize, Deserialize, Clone)]
 #[command(author, version, about, long_about = None)]
 #[command(propagate_version = true)]
@@ -604,6 +609,9 @@ enum Message {
     StartDndOffer(Option<usize>),
     FinishDndOffer(Option<usize>, Option<DesktopEntryData>),
     LeaveDndOffer(Option<usize>),
+    /// Move (or insert) the favorite app with this id so it sits at `index`
+    /// in `config.favorites` (insert-before semantics; `index == len` appends).
+    ReorderFavorite(String, usize),
     ScrollYOffset(f32),
     GpuUpdate(Option<Vec<Gpu>>),
     PinToAppTray(usize),
@@ -706,7 +714,13 @@ impl CosmicAppLibrary {
             iced::Task::perform(
                 async move {
                     let mut apps = config.filtered(cur_group, &input, &all_entries);
-                    apps.sort_by(|a, b| a.name.cmp(&b.name));
+                    // Favorites (with no active search) keep the user's custom
+                    // `config.favorites` order instead of being alphabetized;
+                    // every other view (including searching within Favorites,
+                    // which falls back to a global search) stays alphabetical.
+                    if cur_group != Some(FAVORITES_GROUP) || !input.is_empty() {
+                        apps.sort_by(|a, b| a.name.cmp(&b.name));
+                    }
                     (input, apps)
                 },
                 |(input, apps)| Message::FilterApps(input, apps),
@@ -1307,6 +1321,29 @@ impl cosmic::Application for CosmicAppLibrary {
             Message::LeaveDndOffer(group) => {
                 self.offer_group = self.offer_group.filter(|g| *g != group);
             }
+            Message::ReorderFavorite(id, index) => {
+                if id.is_empty() {
+                    // Drag payload couldn't be resolved to a desktop entry; ignore.
+                    return Task::none();
+                }
+                let favorites = &mut self.config.favorites;
+                let index = if let Some(old) = favorites.iter().position(|f| f == &id) {
+                    favorites.remove(old);
+                    // Removing the old entry shifts everything after it left by
+                    // one, so an insertion index that was past it must shift too.
+                    if old < index { index - 1 } else { index }
+                } else {
+                    index
+                }
+                .min(favorites.len());
+                favorites.insert(index, id);
+                if let Some(helper) = self.helper.as_ref()
+                    && let Err(err) = self.config.write_entry(helper)
+                {
+                    error!("{:?}", err);
+                }
+                return self.filter_apps();
+            }
             Message::ScrollYOffset(y) => {
                 self.scroll_offset = y;
             }
@@ -1776,6 +1813,32 @@ impl cosmic::Application for CosmicAppLibrary {
             .align_y(Alignment::Center)
         };
 
+        // Trailing "append to end" drop zone shown after the last favorite tile
+        // (favorites view only, no active search): dropping an app here moves or
+        // inserts it at the end of `config.favorites`. Sized like a tile so it
+        // slots into the grid; the row-filler below absorbs any leftover width.
+        let append_zone = (favorites_view
+            && self.search_value.is_empty()
+            && !self.entry_path_input.is_empty())
+        .then(|| {
+            let fav_len = self.config.favorites.len();
+            Element::from(
+                dnd_destination_for_data::<AppletString, Message>(
+                    iced::widget::space::horizontal()
+                        .width(Length::FillPortion(1))
+                        .height(Length::Fixed(120.0 + 2.0 * space_s as f32)),
+                    move |data: Option<AppletString>, _| {
+                        let id = data
+                            .and_then(|data| load_desktop_file(&[], data.0))
+                            .map(|entry| entry.id)
+                            .unwrap_or_default();
+                        Message::ReorderFavorite(id, fav_len)
+                    },
+                )
+                .drag_id(FAVORITE_TILE_DRAG_ID_BASE + 999_999),
+            )
+        });
+
         // TODO grid widget in libcosmic
         let app_grid_list: Vec<_> = self
             .entry_path_input
@@ -1818,8 +1881,27 @@ impl cosmic::Application for CosmicAppLibrary {
                     self.menu.is_none().then_some(Message::CancelDrag),
                 );
 
-                b.into()
+                if favorites_view {
+                    // Each favorite tile also acts as a reorder drop target: any
+                    // dropped app id (favorite or not) is inserted before this
+                    // tile's position.
+                    dnd_destination_for_data::<AppletString, Message>(
+                        b,
+                        move |data: Option<AppletString>, _| {
+                            let id = data
+                                .and_then(|data| load_desktop_file(&[], data.0))
+                                .map(|entry| entry.id)
+                                .unwrap_or_default();
+                            Message::ReorderFavorite(id, i)
+                        },
+                    )
+                    .drag_id(FAVORITE_TILE_DRAG_ID_BASE + i as u64)
+                    .into()
+                } else {
+                    b.into()
+                }
             })
+            .chain(append_zone)
             .chunks(7)
             .into_iter()
             .map(|row_chunk| {
