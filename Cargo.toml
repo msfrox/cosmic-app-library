@@ -41,7 +41,8 @@ notify = "*"
 anyhow = "1.0"
 itertools = "0.14"
 url = "2.5"
-nix = "0.30"
+nix = { version = "0.30", features = ["user"] }
+logind-zbus = "5.3.2"
 clap = { version = "4.5", features = ["derive"] }
 switcheroo-control = { git = "https://github.com/pop-os/dbus-settings-bindings" }
 cosmic-app-list-config = { git = "https://github.com/pop-os/cosmic-applets" }

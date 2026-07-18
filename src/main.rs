@@ -4,6 +4,7 @@ mod app;
 mod app_group;
 mod icon_cache;
 mod localize;
+mod power;
 mod subscriptions;
 mod widgets;
 

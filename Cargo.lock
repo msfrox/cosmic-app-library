@@ -1008,6 +1008,7 @@ dependencies = [
  "itertools",
  "libcosmic",
  "log",
+ "logind-zbus",
  "nix",
  "notify",
  "pretty_env_logger",
@@ -3203,6 +3204,16 @@ name = "log"
 version = "0.4.33"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0ceec5bc11778974d1bcb055b18002eba7f4b3518b6a0081b3af5f21666da9ad"
+
+[[package]]
+name = "logind-zbus"
+version = "5.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "469c962578b549a82f3d0cc72d0f77d1123780fa7121e2b03d78b0780f6ccac6"
+dependencies = [
+ "serde",
+ "zbus",
+]
 
 [[package]]
 name = "lru"

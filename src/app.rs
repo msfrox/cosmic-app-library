@@ -83,6 +83,7 @@ use cosmic::{
         divider,
         dnd_destination::dnd_destination_for_data,
         icon::{self, from_name},
+        popover::{self, popover},
         scrollable, search_input, space, svg, text, text_input, tooltip,
     },
 };
@@ -95,6 +96,7 @@ use switcheroo_control::Gpu;
 
 use crate::app_group::{AppGroup, AppLibraryConfig, LibraryPosition};
 use crate::fl;
+use crate::power::PowerAction;
 use crate::subscriptions::desktop_files::desktop_files;
 use crate::widgets::application::{AppletString, ApplicationButton};
 
@@ -243,6 +245,7 @@ struct CosmicAppLibrary {
     entry_path_input: Vec<Arc<DesktopEntryData>>,
     all_entries: Vec<Arc<DesktopEntryData>>,
     menu: Option<usize>,
+    power_menu_open: bool,
     helper: Option<Config>,
     config: AppLibraryConfig,
     cur_group: Option<usize>,
@@ -282,6 +285,7 @@ impl Default for CosmicAppLibrary {
             entry_path_input: Default::default(),
             all_entries: Default::default(),
             menu: Default::default(),
+            power_menu_open: false,
             helper: Default::default(),
             config: Default::default(),
             cur_group: Default::default(),
@@ -561,6 +565,10 @@ enum Message {
     FilterApps(String, Vec<Arc<DesktopEntryData>>),
     OpenContextMenu(Rectangle, usize),
     CloseContextMenu,
+    OpenSettings,
+    TogglePowerMenu,
+    Power(PowerAction),
+    PowerResult(Option<String>),
     SelectAction(MenuAction),
     StartDrag(usize),
     FinishDrag(bool),
@@ -699,6 +707,7 @@ impl CosmicAppLibrary {
         self.edit_name = None;
         self.cur_group = None;
         self.menu = None;
+        self.power_menu_open = false;
         self.group_to_delete = None;
         self.scroll_offset = 0.0;
         self.surface_state = SurfaceState::Hidden;
@@ -1128,6 +1137,52 @@ impl cosmic::Application for CosmicAppLibrary {
                 self.menu = None;
                 return commands::popup::destroy_popup(*MENU_ID);
             }
+            Message::OpenSettings => {
+                self.power_menu_open = false;
+                return request_token(
+                    Some(String::from(<Self as cosmic::Application>::APP_ID)),
+                    Some(SurfaceId::RESERVED),
+                )
+                .map(move |t| {
+                    cosmic::Action::App(Message::ActivationToken(
+                        t,
+                        "com.system76.CosmicSettings".to_string(),
+                        "cosmic-settings".to_string(),
+                        None,
+                        false,
+                    ))
+                });
+            }
+            Message::TogglePowerMenu => {
+                self.power_menu_open = !self.power_menu_open;
+            }
+            Message::Power(action) => {
+                self.power_menu_open = false;
+                let mut tasks = vec![self.hide()];
+                // Confirmation-style actions go through cosmic-osd (same dialog
+                // as the power applet); fall back to DBus if it can't spawn.
+                let use_dbus = match action.osd_arg() {
+                    Some(arg) => std::process::Command::new("cosmic-osd")
+                        .arg(arg)
+                        .spawn()
+                        .is_err(),
+                    None => true,
+                };
+                if use_dbus {
+                    tasks.push(
+                        iced::Task::perform(action.perform(), |res| {
+                            Message::PowerResult(res.err().map(|e| e.to_string()))
+                        })
+                        .map(cosmic::Action::App),
+                    );
+                }
+                return Task::batch(tasks);
+            }
+            Message::PowerResult(err) => {
+                if let Some(err) = err {
+                    error!("power action failed: {err}");
+                }
+            }
             Message::SelectAction(action) => {
                 let mut tasks = vec![commands::popup::destroy_popup(*MENU_ID)];
                 if let Some(info) = self.menu.take().and_then(|i| self.entry_path_input.get(i)) {
@@ -1520,7 +1575,63 @@ impl cosmic::Application for CosmicAppLibrary {
 
         let cur_group = self.current_group();
         let top_row = if self.cur_group.is_none() {
+            let settings_button = tooltip(
+                button::custom(
+                    icon::icon(from_name("preferences-system-symbolic").into())
+                        .width(Length::Fixed(32.0))
+                        .height(Length::Fixed(32.0)),
+                )
+                .padding(space_xs)
+                .class(Button::Icon)
+                .on_press(Message::OpenSettings),
+                text(fl!("settings")),
+                tooltip::Position::Bottom,
+            );
+
+            let power_button = button::custom(
+                icon::icon(from_name("system-shutdown-symbolic").into())
+                    .width(Length::Fixed(32.0))
+                    .height(Length::Fixed(32.0)),
+            )
+            .padding(space_xs)
+            .class(Button::Icon)
+            .on_press(Message::TogglePowerMenu);
+
+            let power_element: Element<'_, Message> = if self.power_menu_open {
+                let power_menu = container(MenuColumn::with_children(vec![
+                    menu_button(text::body(fl!("lock-screen")))
+                        .on_press(Message::Power(PowerAction::Lock))
+                        .into(),
+                    menu_button(text::body(fl!("suspend")))
+                        .on_press(Message::Power(PowerAction::Suspend))
+                        .into(),
+                    divider::horizontal::light().into(),
+                    menu_button(text::body(fl!("log-out")))
+                        .on_press(Message::Power(PowerAction::LogOut))
+                        .into(),
+                    menu_button(text::body(fl!("restart")))
+                        .on_press(Message::Power(PowerAction::Restart))
+                        .into(),
+                    menu_button(text::body(fl!("shutdown")))
+                        .on_press(Message::Power(PowerAction::Shutdown))
+                        .into(),
+                ]))
+                .width(Length::Fixed(220.0))
+                .padding(1)
+                .class(theme::Container::Dropdown);
+
+                popover(power_button)
+                    .popup(power_menu)
+                    .position(popover::Position::Bottom)
+                    .modal(true)
+                    .on_close(Message::TogglePowerMenu)
+                    .into()
+            } else {
+                tooltip(power_button, text(fl!("power")), tooltip::Position::Bottom).into()
+            };
+
             row![
+                space::horizontal().width(Length::FillPortion(1)),
                 container(
                     search_input(SEARCH_PLACEHOLDER.as_str(), self.search_value.as_str())
                         .on_input(Message::InputChanged)
@@ -1532,8 +1643,13 @@ impl cosmic::Application for CosmicAppLibrary {
                         .id(SEARCH_ID.clone())
                 )
                 .align_y(Vertical::Center)
-                .height(Length::Fixed(96.0))
+                .height(Length::Fixed(96.0)),
+                row![space::horizontal(), settings_button, power_element]
+                    .spacing(space_xxs)
+                    .align_y(Alignment::Center)
+                    .width(Length::FillPortion(1))
             ]
+            .padding([0, space_l])
             .align_y(Alignment::Center)
             .spacing(space_xxs)
         } else {
