@@ -242,6 +242,16 @@ pub struct AppLibraryConfig {
     /// Windows-11-style folders shown inline in Home/Favorites.
     #[serde(default)]
     pub folders: Vec<AppFolder>,
+    /// Show the cosmic-settings shortcut button in the header.
+    #[serde(default = "default_true")]
+    pub show_settings_button: bool,
+    /// Show the power-menu button in the header.
+    #[serde(default = "default_true")]
+    pub show_power_button: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 fn default_grid_columns() -> u32 {
@@ -579,6 +589,8 @@ impl Default for AppLibraryConfig {
             grid_columns: default_grid_columns(),
             grid_rows: default_grid_rows(),
             folders: Vec::new(),
+            show_settings_button: true,
+            show_power_button: true,
         }
     }
 }

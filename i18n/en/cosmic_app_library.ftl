@@ -49,3 +49,5 @@ position-bottom = Bottom
 position-center = Center
 grid-columns = Columns
 grid-rows = Rows
+show-settings-button = Show Settings shortcut
+show-power-button = Show Power menu

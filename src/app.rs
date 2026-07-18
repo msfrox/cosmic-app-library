@@ -723,6 +723,10 @@ enum Message {
     SetGridColumns(u32),
     /// Set `config.grid_rows`.
     SetGridRows(u32),
+    /// Show or hide the header's cosmic-settings shortcut button.
+    SetShowSettings(bool),
+    /// Show or hide the header's power-menu button.
+    SetShowPower(bool),
 }
 
 #[derive(Clone, Debug)]
@@ -1739,6 +1743,26 @@ impl cosmic::Application for CosmicAppLibrary {
                 }
                 return set_padding::<()>(SurfaceId::RESERVED, self.layer_padding()).discard();
             }
+            Message::SetShowSettings(show) => {
+                self.config.show_settings_button = show;
+                if let Some(helper) = self.helper.as_ref()
+                    && let Err(err) = self.config.write_entry(helper)
+                {
+                    error!("{:?}", err);
+                }
+            }
+            Message::SetShowPower(show) => {
+                self.config.show_power_button = show;
+                // A hidden button can't close its own open menu — close it here.
+                if !show {
+                    self.power_menu_open = false;
+                }
+                if let Some(helper) = self.helper.as_ref()
+                    && let Err(err) = self.config.write_entry(helper)
+                {
+                    error!("{:?}", err);
+                }
+            }
             Message::ScrollYOffset(y) => {
                 self.scroll_offset = y;
             }
@@ -2209,15 +2233,16 @@ impl cosmic::Application for CosmicAppLibrary {
                 )
                 .align_y(Vertical::Center)
                 .height(Length::Fixed(96.0)),
-                row![
-                    space::horizontal(),
-                    library_settings_button,
-                    settings_button,
-                    power_element
-                ]
-                .spacing(space_xxs)
-                .align_y(Alignment::Center)
-                .width(Length::FillPortion(1))
+                row![space::horizontal(), library_settings_button]
+                    .push_maybe(
+                        self.config
+                            .show_settings_button
+                            .then(|| Element::from(settings_button)),
+                    )
+                    .push_maybe(self.config.show_power_button.then_some(power_element))
+                    .spacing(space_xxs)
+                    .align_y(Alignment::Center)
+                    .width(Length::FillPortion(1))
             ]
             .padding([0, space_l])
             .align_y(Alignment::Center)
@@ -2744,9 +2769,30 @@ impl cosmic::Application for CosmicAppLibrary {
             .align_y(Alignment::Center)
             .height(Length::Fixed(48.0));
 
-            let settings_body = column![position_row, columns_row, rows_row]
-                .spacing(space_s)
-                .padding([space_s, space_xxl]);
+            let show_settings_row = row![
+                text::body(fl!("show-settings-button")).width(Length::Fill),
+                widget::toggler(self.config.show_settings_button)
+                    .on_toggle(Message::SetShowSettings),
+            ]
+            .align_y(Alignment::Center)
+            .height(Length::Fixed(48.0));
+
+            let show_power_row = row![
+                text::body(fl!("show-power-button")).width(Length::Fill),
+                widget::toggler(self.config.show_power_button).on_toggle(Message::SetShowPower),
+            ]
+            .align_y(Alignment::Center)
+            .height(Length::Fixed(48.0));
+
+            let settings_body = column![
+                position_row,
+                columns_row,
+                rows_row,
+                show_settings_row,
+                show_power_row
+            ]
+            .spacing(space_s)
+            .padding([space_s, space_xxl]);
 
             column![
                 settings_top_row,
