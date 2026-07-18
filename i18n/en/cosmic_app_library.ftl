@@ -33,3 +33,7 @@ suspend = Suspend
 log-out = Log Out
 restart = Restart
 shutdown = Shut Down
+favorites = Favorites
+add-favorite = Add to Favorites
+remove-favorite = Remove from Favorites
+favorites-empty = Right-click an app and select "Add to Favorites".

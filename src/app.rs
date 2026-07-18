@@ -94,7 +94,7 @@ use sctk::shell::wlr_layer;
 use serde::{Deserialize, Serialize};
 use switcheroo_control::Gpu;
 
-use crate::app_group::{AppGroup, AppLibraryConfig, LibraryPosition};
+use crate::app_group::{AppGroup, AppLibraryConfig, FAVORITES_GROUP, LibraryPosition};
 use crate::fl;
 use crate::power::PowerAction;
 use crate::subscriptions::desktop_files::desktop_files;
@@ -383,7 +383,8 @@ impl CosmicAppLibrary {
             self.edit_name = None;
             self.search_value = "".to_string();
             self.scroll_offset = 0.0;
-            self.cur_group = None;
+            // Open on Favorites when any exist, otherwise Home.
+            self.cur_group = (!self.config.favorites.is_empty()).then_some(FAVORITES_GROUP);
             self.load_apps();
             self.needs_clear = true;
             let fetch_gpus = Task::perform(try_get_gpus(), |gpus| {
@@ -532,6 +533,7 @@ impl CosmicAppLibrary {
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 enum GroupRowKey {
     Home,
+    Favorites,
     Custom(u64),
     NewGroup,
 }
@@ -566,6 +568,7 @@ enum Message {
     OpenContextMenu(Rectangle, usize),
     CloseContextMenu,
     OpenSettings,
+    ToggleFavorite(usize),
     TogglePowerMenu,
     Power(PowerAction),
     PowerResult(Option<String>),
@@ -611,6 +614,7 @@ impl CosmicAppLibrary {
     fn current_group(&self) -> &AppGroup {
         match self.cur_group {
             None => AppLibraryConfig::home(),
+            Some(FAVORITES_GROUP) => AppLibraryConfig::favorites_group(),
             Some(i) => &self.config.groups[i],
         }
     }
@@ -967,9 +971,9 @@ impl cosmic::Application for CosmicAppLibrary {
                 self.search_value.clear();
                 self.cur_group = group;
                 self.scroll_offset = 0.0;
-                self.scrollable_id = Id::new(format!("group-{}", group.unwrap_or(usize::MAX)));
+                self.scrollable_id = Id::new(format!("group-{group:?}"));
                 let mut cmds = vec![self.filter_apps()];
-                if self.cur_group.is_none() {
+                if self.cur_group.is_none() || self.cur_group == Some(FAVORITES_GROUP) {
                     cmds.push(text_input::focus(SEARCH_ID.clone()));
                 }
                 return iced::Task::batch(cmds);
@@ -982,7 +986,7 @@ impl cosmic::Application for CosmicAppLibrary {
                     .into_iter()
                     .filter_map(|key| match key {
                         GroupRowKey::Custom(k) => Some(k),
-                        GroupRowKey::Home | GroupRowKey::NewGroup => None,
+                        GroupRowKey::Home | GroupRowKey::Favorites | GroupRowKey::NewGroup => None,
                     })
                     .collect();
 
@@ -1136,6 +1140,25 @@ impl cosmic::Application for CosmicAppLibrary {
             Message::CloseContextMenu => {
                 self.menu = None;
                 return commands::popup::destroy_popup(*MENU_ID);
+            }
+            Message::ToggleFavorite(i) => {
+                self.menu = None;
+                let mut tasks = vec![commands::popup::destroy_popup(*MENU_ID)];
+                if let Some(info) = self.entry_path_input.get(i) {
+                    let id = info.id.clone();
+                    if self.config.is_favorite(&id) {
+                        self.config.remove_entry(Some(FAVORITES_GROUP), &id);
+                    } else {
+                        self.config.add_entry(Some(FAVORITES_GROUP), &id);
+                    }
+                    if let Some(helper) = self.helper.as_ref()
+                        && let Err(err) = self.config.write_entry(helper)
+                    {
+                        error!("{:?}", err);
+                    }
+                    tasks.push(self.filter_apps());
+                }
+                return Task::batch(tasks);
             }
             Message::OpenSettings => {
                 self.power_menu_open = false;
@@ -1494,10 +1517,22 @@ impl cosmic::Application for CosmicAppLibrary {
             } else {
                 Message::PinToAppTray(*i)
             });
+            let is_fav = self.config.is_favorite(&menu.id);
+            list_column.push(divider::horizontal::light().into());
+            list_column.push(
+                menu_button(text::body(if is_fav {
+                    fl!("remove-favorite")
+                } else {
+                    fl!("add-favorite")
+                }))
+                .on_press(Message::ToggleFavorite(*i))
+                .into(),
+            );
+
             list_column.push(divider::horizontal::light().into());
             list_column.push(pin_to_app_tray.into());
 
-            if self.cur_group.is_some() {
+            if self.cur_group.is_some_and(|g| g != FAVORITES_GROUP) {
                 list_column.push(divider::horizontal::light().into());
                 list_column.push(
                     menu_button(text::body(REMOVE.clone()))
@@ -1574,7 +1609,8 @@ impl cosmic::Application for CosmicAppLibrary {
         }
 
         let cur_group = self.current_group();
-        let top_row = if self.cur_group.is_none() {
+        let favorites_view = self.cur_group == Some(FAVORITES_GROUP);
+        let top_row = if self.cur_group.is_none() || favorites_view {
             let settings_button = tooltip(
                 button::custom(
                     icon::icon(from_name("preferences-system-symbolic").into())
@@ -1774,22 +1810,32 @@ impl cosmic::Application for CosmicAppLibrary {
             })
             .collect();
 
-        let app_scrollable = container(
-            scrollable(
-                column(app_grid_list)
-                    .width(Length::Fill)
-                    .spacing(space_xxs)
-                    // padding on top needed to avoid focus highlight clipping
-                    .padding([4, space_xxl, space_xxs, space_xxl]),
+        let app_scrollable = if favorites_view
+            && self.entry_path_input.is_empty()
+            && self.search_value.is_empty()
+        {
+            container(text::body(fl!("favorites-empty")))
+                .center_x(Length::Fill)
+                .center_y(Length::Fill)
+                .max_height(444.0)
+        } else {
+            container(
+                scrollable(
+                    column(app_grid_list)
+                        .width(Length::Fill)
+                        .spacing(space_xxs)
+                        // padding on top needed to avoid focus highlight clipping
+                        .padding([4, space_xxl, space_xxs, space_xxl]),
+                )
+                .on_scroll(|viewport| Message::ScrollYOffset(viewport.absolute_offset().y))
+                .id(self.scrollable_id.clone())
+                .height(Length::Fill),
             )
-            .on_scroll(|viewport| Message::ScrollYOffset(viewport.absolute_offset().y))
-            .id(self.scrollable_id.clone())
-            .height(Length::Fill),
-        )
-        .max_height(444.0);
+            .max_height(444.0)
+        };
 
         // TODO use the spacing variables from the theme
-        let (group_icon_size, h_padding, group_width) = if self.config.groups.len() + 1 > 15 {
+        let (group_icon_size, h_padding, group_width) = if self.config.groups.len() + 2 > 15 {
             (16.0, space_xxs, 96.0)
         } else {
             (32.0, space_s, 128.0)
@@ -1879,7 +1925,14 @@ impl cosmic::Application for CosmicAppLibrary {
                 reorderable_flex_row::<GroupRowKey, Message>(Message::ReorderGroup)
                     .spacing(space_xxs)
                     .padding([space_s, space_none])
-                    .push_locked(GroupRowKey::Home, build_group_button(None, home)),
+                    .push_locked(GroupRowKey::Home, build_group_button(None, home))
+                    .push_locked(
+                        GroupRowKey::Favorites,
+                        build_group_button(
+                            Some(FAVORITES_GROUP),
+                            AppLibraryConfig::favorites_group(),
+                        ),
+                    ),
                 |row, (i, group)| {
                     let key = self.group_keys.get(i).copied().unwrap_or(i as u64);
                     row.push(GroupRowKey::Custom(key), build_group_button(Some(i), group))

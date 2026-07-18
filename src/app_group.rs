@@ -15,6 +15,16 @@ static HOME: LazyLock<AppGroup> = LazyLock::new(|| AppGroup {
     filter: FilterType::None,
 });
 
+/// Sentinel group index for the built-in Favorites group. Favorites entries are
+/// stored separately from `groups` so favorited apps still appear in Home.
+pub const FAVORITES_GROUP: usize = usize::MAX;
+
+static FAVORITES: LazyLock<AppGroup> = LazyLock::new(|| AppGroup {
+    name: "cosmic-favorites".to_string(),
+    icon: "starred-symbolic".to_string(),
+    filter: FilterType::None,
+});
+
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Hash)]
 pub enum FilterType {
     /// A list of application IDs to include in the group.
@@ -153,6 +163,8 @@ impl AppGroup {
     pub fn name(&self) -> String {
         if &self.name == "cosmic-library-home" {
             fl!("cosmic-library-home")
+        } else if &self.name == "cosmic-favorites" {
+            fl!("favorites")
         } else if &self.name == "cosmic-office" {
             fl!("cosmic-office")
         } else if &self.name == "cosmic-system" {
@@ -189,6 +201,9 @@ pub struct AppLibraryConfig {
     /// Which edge of the screen the library opens from.
     #[serde(default)]
     pub position: LibraryPosition,
+    /// App IDs in the built-in Favorites group.
+    #[serde(default)]
+    pub favorites: Vec<String>,
 }
 
 impl AppLibraryConfig {
@@ -202,6 +217,14 @@ impl AppLibraryConfig {
 
     pub fn home() -> &'static AppGroup {
         &HOME
+    }
+
+    pub fn favorites_group() -> &'static AppGroup {
+        &FAVORITES
+    }
+
+    pub fn is_favorite(&self, id: &str) -> bool {
+        self.favorites.iter().any(|f| f == id)
     }
 
     pub fn add(&mut self, name: String) {
@@ -225,6 +248,10 @@ impl AppLibraryConfig {
     }
 
     pub fn remove_entry(&mut self, group: Option<usize>, id: &str) {
+        if group == Some(FAVORITES_GROUP) {
+            self.favorites.retain(|f| f != id);
+            return;
+        }
         let Some(group) = group.and_then(|i| self.groups.get_mut(i)) else {
             return;
         };
@@ -242,6 +269,12 @@ impl AppLibraryConfig {
     }
 
     pub fn add_entry(&mut self, group: Option<usize>, id: &str) {
+        if group == Some(FAVORITES_GROUP) {
+            if !self.is_favorite(id) {
+                self.favorites.push(id.to_string());
+            }
+            return;
+        }
         if let Some(group) = group.and_then(|i| self.groups.get_mut(i)) {
             match &mut group.filter {
                 FilterType::AppIds(ids) => {
@@ -286,6 +319,18 @@ impl AppLibraryConfig {
     ) -> Vec<Arc<DesktopEntryData>> {
         match group {
             None => HOME.filtered(input_value, &self.groups, entries),
+            Some(FAVORITES_GROUP) => {
+                if input_value.is_empty() {
+                    entries
+                        .iter()
+                        .filter(|e| self.is_favorite(&e.id))
+                        .cloned()
+                        .collect()
+                } else {
+                    // Searching in Favorites searches all apps, like Home.
+                    HOME.filtered(input_value, &self.groups, entries)
+                }
+            }
             Some(i) => self
                 .groups
                 .get(i)
@@ -344,6 +389,7 @@ impl Default for AppLibraryConfig {
                 },
             ],
             position: LibraryPosition::default(),
+            favorites: Vec::new(),
         }
     }
 }
