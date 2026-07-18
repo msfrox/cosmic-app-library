@@ -233,23 +233,23 @@ pub struct AppLibraryConfig {
     /// App IDs in the built-in Favorites group.
     #[serde(default)]
     pub favorites: Vec<String>,
-    /// Width of the app library window, in logical pixels.
-    #[serde(default = "default_window_width")]
-    pub window_width: f32,
-    /// Height of the app library window, in logical pixels.
-    #[serde(default = "default_window_height")]
-    pub window_height: f32,
+    /// Number of app columns in the grid (drives the window width).
+    #[serde(default = "default_grid_columns")]
+    pub grid_columns: u32,
+    /// Number of visible app rows in the grid (drives the window height).
+    #[serde(default = "default_grid_rows")]
+    pub grid_rows: u32,
     /// Windows-11-style folders shown inline in Home/Favorites.
     #[serde(default)]
     pub folders: Vec<AppFolder>,
 }
 
-fn default_window_width() -> f32 {
-    1200.0
+fn default_grid_columns() -> u32 {
+    7
 }
 
-fn default_window_height() -> f32 {
-    690.0
+fn default_grid_rows() -> u32 {
+    3
 }
 
 impl AppLibraryConfig {
@@ -576,8 +576,8 @@ impl Default for AppLibraryConfig {
             ],
             position: LibraryPosition::default(),
             favorites: Vec::new(),
-            window_width: default_window_width(),
-            window_height: default_window_height(),
+            grid_columns: default_grid_columns(),
+            grid_rows: default_grid_rows(),
             folders: Vec::new(),
         }
     }

@@ -123,6 +123,17 @@ static NIX: LazyLock<String> = LazyLock::new(|| fl!("nix"));
 static SNAP: LazyLock<String> = LazyLock::new(|| fl!("snap"));
 static SYSTEM: LazyLock<String> = LazyLock::new(|| fl!("system"));
 
+/// Labels for the library-settings position dropdown, indexed the same way
+/// as `Message::SetPosition` (0 = Auto, 1 = Top, 2 = Bottom, 3 = Center).
+static POSITION_LABELS: LazyLock<Vec<String>> = LazyLock::new(|| {
+    vec![
+        fl!("position-auto"),
+        fl!("position-top"),
+        fl!("position-bottom"),
+        fl!("position-center"),
+    ]
+});
+
 static NEW_GROUP_WINDOW_ID: LazyLock<SurfaceId> = LazyLock::new(SurfaceId::unique);
 static NEW_GROUP_AUTOSIZE_ID: LazyLock<cosmic::widget::Id> =
     LazyLock::new(cosmic::widget::Id::unique);
@@ -305,6 +316,8 @@ struct CosmicAppLibrary {
     /// Favorites drop zone a drag currently hovers `(tile index, zone)`;
     /// renders the insertion bar / combine highlight while dragging.
     fav_drop_hint: Option<(usize, FavDropZone)>,
+    /// In-place library-settings page open (replaces the grid area).
+    settings_view: bool,
 }
 
 impl Default for CosmicAppLibrary {
@@ -349,6 +362,7 @@ impl Default for CosmicAppLibrary {
             open_folder: Default::default(),
             folder_name_buffer: Default::default(),
             fav_drop_hint: Default::default(),
+            settings_view: false,
         }
     }
 }
@@ -538,16 +552,24 @@ impl CosmicAppLibrary {
 
     /// Configured window width, clamped to a sane minimum and to the screen size.
     fn window_width(&self) -> f32 {
-        self.config
-            .window_width
-            .clamp(600.0, self.size.width.max(600.0))
+        let cols = self.config.grid_columns.clamp(4, 12);
+        (cols as f32 * 160.0 + 80.0).clamp(600.0, self.size.width.max(600.0))
     }
 
     /// Configured window height, clamped to a sane minimum and to the screen size.
     fn window_height(&self) -> f32 {
-        self.config
-            .window_height
-            .clamp(400.0, self.size.height.max(400.0))
+        let rows = self.config.grid_rows.clamp(2, 8);
+        (rows as f32 * 148.0 + 246.0).clamp(400.0, self.size.height.max(400.0))
+    }
+
+    /// Number of app columns in the grid, clamped to a sane range.
+    fn grid_columns(&self) -> usize {
+        self.config.grid_columns.clamp(4, 12) as usize
+    }
+
+    /// Max height of the app grid scrollable, derived from configured rows.
+    fn grid_max_height(&self) -> f32 {
+        self.config.grid_rows.clamp(2, 8) as f32 * 148.0
     }
 
     #[allow(clippy::cast_possible_truncation)]
@@ -693,6 +715,14 @@ enum Message {
     RemoveFromFolder(String),
     /// Dissolve folder `usize`, returning its apps to the host view.
     UngroupFolder(usize),
+    /// Toggle the in-place library-settings page.
+    ToggleLibrarySettings,
+    /// Set `config.position` from a dropdown index (0..=3).
+    SetPosition(usize),
+    /// Set `config.grid_columns`.
+    SetGridColumns(u32),
+    /// Set `config.grid_rows`.
+    SetGridRows(u32),
 }
 
 #[derive(Clone, Debug)]
@@ -938,6 +968,7 @@ impl CosmicAppLibrary {
         self.group_to_delete = None;
         self.fav_drop_hint = None;
         self.scroll_offset = 0.0;
+        self.settings_view = false;
         self.surface_state = SurfaceState::Hidden;
         self.hand_over.clear();
 
@@ -1002,13 +1033,14 @@ impl cosmic::Application for CosmicAppLibrary {
             }
             Message::UpdateFocused(id) => {
                 self.focused_id = id;
+                let cols = self.grid_columns();
                 let i = self
                     .focused_id
                     .as_ref()
                     .and_then(|focused| self.entry_ids.iter().position(|i| i == focused))
                     .unwrap_or(0);
-                let y =
-                    ((i / 7) as f32 / ((self.entry_path_input.len() / 7) as f32).max(1.)).max(0.0);
+                let y = ((i / cols) as f32 / ((self.entry_path_input.len() / cols) as f32).max(1.))
+                    .max(0.0);
 
                 return iced_runtime::task::widget(operation::scrollable::snap_to(
                     self.scrollable_id.clone(),
@@ -1042,11 +1074,12 @@ impl cosmic::Application for CosmicAppLibrary {
             },
 
             Message::PrevRow => {
+                let cols = self.grid_columns();
                 let mut i = self
                     .focused_id
                     .as_ref()
                     .and_then(|focused| self.entry_ids.iter().position(|i| i == focused))
-                    .unwrap_or(self.entry_ids.len().saturating_add(6));
+                    .unwrap_or(self.entry_ids.len().saturating_add(cols - 1));
                 if i == 0 {
                     self.focused_id = None;
 
@@ -1057,9 +1090,9 @@ impl cosmic::Application for CosmicAppLibrary {
                             .map(|id| cosmic::Action::App(Message::UpdateFocused(Some(id)))),
                     ]);
                 }
-                i = i.saturating_sub(7);
-                let y =
-                    ((i / 7) as f32 / ((self.entry_path_input.len() / 7) as f32).max(1.)).max(0.0);
+                i = i.saturating_sub(cols);
+                let y = ((i / cols) as f32 / ((self.entry_path_input.len() / cols) as f32).max(1.))
+                    .max(0.0);
 
                 let Some(focused) = self.entry_ids.get(i).cloned() else {
                     return Task::none();
@@ -1078,12 +1111,13 @@ impl cosmic::Application for CosmicAppLibrary {
                 ]);
             }
             Message::NextRow => {
+                let cols = self.grid_columns();
                 let mut i: i32 = self
                     .focused_id
                     .as_ref()
                     .and_then(|focused| self.entry_ids.iter().position(|i| i == focused))
                     .map(|i| i as i32)
-                    .unwrap_or(-7);
+                    .unwrap_or(-(cols as i32));
                 if i == self.entry_ids.len() as i32 - 1 {
                     self.focused_id = None;
                     return iced::Task::batch(vec![
@@ -1093,14 +1127,15 @@ impl cosmic::Application for CosmicAppLibrary {
                             .map(|id| cosmic::Action::App(Message::UpdateFocused(Some(id)))),
                     ]);
                 }
-                i += 7;
+                i += cols as i32;
                 i = i.min(self.entry_ids.len() as i32 - 1);
                 let Some(focused) = self.entry_ids.get(i as usize).cloned() else {
                     return Task::none();
                 };
                 self.focused_id = Some(focused.clone());
-                let y =
-                    ((i / 7) as f32 / ((self.entry_path_input.len() / 7) as f32).max(1.)).max(0.0);
+                let y = ((i / cols as i32) as f32
+                    / ((self.entry_path_input.len() / cols) as f32).max(1.))
+                .max(0.0);
 
                 return Task::batch(vec![
                     iced_runtime::task::widget(operation::scrollable::snap_to(
@@ -1157,6 +1192,10 @@ impl cosmic::Application for CosmicAppLibrary {
                 return self.hide();
             }
             Message::EscapePressed => {
+                if self.settings_view {
+                    self.settings_view = false;
+                    return Task::none();
+                }
                 if self.open_folder.is_some() {
                     return self.update(Message::CloseFolder);
                 }
@@ -1658,6 +1697,48 @@ impl cosmic::Application for CosmicAppLibrary {
                 }
                 return self.filter_apps();
             }
+            Message::ToggleLibrarySettings => {
+                self.menu = None;
+                self.power_menu_open = false;
+                let mut cmds = Vec::with_capacity(2);
+                if self.open_folder.is_some() {
+                    cmds.push(self.update(Message::CloseFolder));
+                }
+                self.settings_view = !self.settings_view;
+                return Task::batch(cmds);
+            }
+            Message::SetPosition(idx) => {
+                self.config.position = match idx {
+                    1 => LibraryPosition::Top,
+                    2 => LibraryPosition::Bottom,
+                    3 => LibraryPosition::Center,
+                    _ => LibraryPosition::Auto,
+                };
+                if let Some(helper) = self.helper.as_ref()
+                    && let Err(err) = self.config.write_entry(helper)
+                {
+                    error!("{:?}", err);
+                }
+                return set_padding::<()>(SurfaceId::RESERVED, self.layer_padding()).discard();
+            }
+            Message::SetGridColumns(v) => {
+                self.config.grid_columns = v.clamp(4, 12);
+                if let Some(helper) = self.helper.as_ref()
+                    && let Err(err) = self.config.write_entry(helper)
+                {
+                    error!("{:?}", err);
+                }
+                return set_padding::<()>(SurfaceId::RESERVED, self.layer_padding()).discard();
+            }
+            Message::SetGridRows(v) => {
+                self.config.grid_rows = v.clamp(2, 8);
+                if let Some(helper) = self.helper.as_ref()
+                    && let Err(err) = self.config.write_entry(helper)
+                {
+                    error!("{:?}", err);
+                }
+                return set_padding::<()>(SurfaceId::RESERVED, self.layer_padding()).discard();
+            }
             Message::ScrollYOffset(y) => {
                 self.scroll_offset = y;
             }
@@ -2046,6 +2127,19 @@ impl cosmic::Application for CosmicAppLibrary {
             .padding([0, space_l])
             .align_y(Alignment::Center)
         } else if self.cur_group.is_none() || favorites_view {
+            let library_settings_button = tooltip(
+                button::custom(
+                    icon::icon(from_name("emblem-system-symbolic").into())
+                        .width(Length::Fixed(32.0))
+                        .height(Length::Fixed(32.0)),
+                )
+                .padding(space_xs)
+                .class(Button::Icon)
+                .on_press(Message::ToggleLibrarySettings),
+                text(fl!("library-settings")),
+                tooltip::Position::Bottom,
+            );
+
             let settings_button = tooltip(
                 button::custom(
                     icon::icon(from_name("preferences-system-symbolic").into())
@@ -2115,10 +2209,15 @@ impl cosmic::Application for CosmicAppLibrary {
                 )
                 .align_y(Vertical::Center)
                 .height(Length::Fixed(96.0)),
-                row![space::horizontal(), settings_button, power_element]
-                    .spacing(space_xxs)
-                    .align_y(Alignment::Center)
-                    .width(Length::FillPortion(1))
+                row![
+                    space::horizontal(),
+                    library_settings_button,
+                    settings_button,
+                    power_element
+                ]
+                .spacing(space_xxs)
+                .align_y(Alignment::Center)
+                .width(Length::FillPortion(1))
             ]
             .padding([0, space_l])
             .align_y(Alignment::Center)
@@ -2397,15 +2496,16 @@ impl cosmic::Application for CosmicAppLibrary {
                 }
             });
 
+        let cols = self.grid_columns();
         let app_grid_list: Vec<_> = folder_tiles
             .into_iter()
             .chain(app_tiles)
             .chain(append_zone)
-            .chunks(7)
+            .chunks(cols)
             .into_iter()
             .map(|row_chunk| {
                 let mut new_row = row_chunk.collect_vec();
-                let missing = 7 - new_row.len();
+                let missing = cols - new_row.len();
                 if missing > 0 {
                     new_row.push(
                         iced::widget::space::horizontal()
@@ -2425,7 +2525,7 @@ impl cosmic::Application for CosmicAppLibrary {
             container(text::body(fl!("favorites-empty")))
                 .center_x(Length::Fill)
                 .center_y(Length::Fill)
-                .max_height(444.0)
+                .max_height(self.grid_max_height())
         } else {
             container(
                 scrollable(
@@ -2439,7 +2539,7 @@ impl cosmic::Application for CosmicAppLibrary {
                 .id(self.scrollable_id.clone())
                 .height(Length::Fill),
             )
-            .max_height(444.0)
+            .max_height(self.grid_max_height())
         };
 
         // TODO use the spacing variables from the theme
@@ -2547,15 +2647,130 @@ impl cosmic::Application for CosmicAppLibrary {
             )
             .push_locked(GroupRowKey::NewGroup, add_group_btn);
 
-        let content = column![
-            top_row,
-            app_scrollable,
-            container(horizontal_rule(1))
-                .padding([space_none, space_xxl])
-                .width(Length::Fill),
-            group_row
-        ]
-        .align_x(Alignment::Center);
+        let content: Element<'_, Message> = if self.settings_view {
+            let settings_top_row = row![
+                container(
+                    button::custom(
+                        icon::icon(from_name("go-previous-symbolic").into())
+                            .width(Length::Fixed(32.0))
+                            .height(Length::Fixed(32.0)),
+                    )
+                    .padding(space_xs)
+                    .class(Button::Icon)
+                    .on_press(Message::ToggleLibrarySettings)
+                )
+                .height(Length::Fixed(96.0))
+                .align_y(Vertical::Center)
+                .width(Length::FillPortion(1)),
+                container(
+                    text(fl!("library-settings"))
+                        .size(24)
+                        .width(Length::Fill)
+                        .center(),
+                )
+                .width(Length::Fill)
+                .center_x(Length::FillPortion(8)),
+                space::horizontal().width(Length::FillPortion(1)),
+            ]
+            .padding([0, space_l])
+            .align_y(Alignment::Center);
+
+            let pos_idx = match self.config.position {
+                LibraryPosition::Auto => 0,
+                LibraryPosition::Top => 1,
+                LibraryPosition::Bottom => 2,
+                LibraryPosition::Center => 3,
+            };
+            let position_row = row![
+                text::body(fl!("position")).width(Length::Fill),
+                cosmic::widget::dropdown(
+                    &POSITION_LABELS[..],
+                    Some(pos_idx),
+                    Message::SetPosition
+                ),
+            ]
+            .align_y(Alignment::Center)
+            .height(Length::Fixed(48.0));
+
+            let cur_cols = self.config.grid_columns.clamp(4, 12);
+            let columns_row = row![
+                text::body(fl!("grid-columns")).width(Length::Fill),
+                button::custom(
+                    icon::icon(from_name("list-remove-symbolic").into())
+                        .width(Length::Fixed(16.0))
+                        .height(Length::Fixed(16.0))
+                )
+                .padding(space_xs)
+                .class(Button::Icon)
+                .on_press_maybe((cur_cols > 4).then(|| Message::SetGridColumns(cur_cols - 1))),
+                container(text::body(cur_cols.to_string()).center())
+                    .width(Length::Fixed(40.0))
+                    .center_x(Length::Fixed(40.0)),
+                button::custom(
+                    icon::icon(from_name("list-add-symbolic").into())
+                        .width(Length::Fixed(16.0))
+                        .height(Length::Fixed(16.0))
+                )
+                .padding(space_xs)
+                .class(Button::Icon)
+                .on_press_maybe((cur_cols < 12).then(|| Message::SetGridColumns(cur_cols + 1))),
+            ]
+            .align_y(Alignment::Center)
+            .height(Length::Fixed(48.0));
+
+            let cur_rows = self.config.grid_rows.clamp(2, 8);
+            let rows_row = row![
+                text::body(fl!("grid-rows")).width(Length::Fill),
+                button::custom(
+                    icon::icon(from_name("list-remove-symbolic").into())
+                        .width(Length::Fixed(16.0))
+                        .height(Length::Fixed(16.0))
+                )
+                .padding(space_xs)
+                .class(Button::Icon)
+                .on_press_maybe((cur_rows > 2).then(|| Message::SetGridRows(cur_rows - 1))),
+                container(text::body(cur_rows.to_string()).center())
+                    .width(Length::Fixed(40.0))
+                    .center_x(Length::Fixed(40.0)),
+                button::custom(
+                    icon::icon(from_name("list-add-symbolic").into())
+                        .width(Length::Fixed(16.0))
+                        .height(Length::Fixed(16.0))
+                )
+                .padding(space_xs)
+                .class(Button::Icon)
+                .on_press_maybe((cur_rows < 8).then(|| Message::SetGridRows(cur_rows + 1))),
+            ]
+            .align_y(Alignment::Center)
+            .height(Length::Fixed(48.0));
+
+            let settings_body = column![position_row, columns_row, rows_row]
+                .spacing(space_s)
+                .padding([space_s, space_xxl]);
+
+            column![
+                settings_top_row,
+                container(
+                    container(settings_body)
+                        .max_width(480.0)
+                        .center_x(Length::Fill)
+                )
+                .height(Length::Fill)
+            ]
+            .align_x(Alignment::Center)
+            .into()
+        } else {
+            column![
+                top_row,
+                app_scrollable,
+                container(horizontal_rule(1))
+                    .padding([space_none, space_xxl])
+                    .width(Length::Fill),
+                group_row
+            ]
+            .align_x(Alignment::Center)
+            .into()
+        };
 
         let window_width = self.window_width();
         let window_height = self.window_height();
