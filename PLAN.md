@@ -104,7 +104,7 @@ One-liner: `Message::CloseContextMenu` (fires via the window-wide `mouse_area`,
 app.rs:1976) now also sets `power_menu_open = false`. Same flow the main window
 uses; backdrop clicks already closed it via `hide()`.
 
-### Phase 6 — Center position + configurable window size
+### Phase 6 — Center position + configurable window size ✅
 - `LibraryPosition` gets `Center` (manual-only; Auto still resolves Top/Bottom
   from dock). `layer_padding()` (app.rs:499–510): Center = symmetric
   `((size.height − H)/2)` top+bottom. View `positioned` match (app.rs:1977–87):
@@ -113,7 +113,7 @@ uses; backdrop clicks already closed it via `hide()`.
   ≥ 600×400 and ≤ screen). Replace hardcoded 690/1200 at app.rs:499–508,
   1954–57, 1975 and anywhere else. No settings UI — config-file only for now.
 
-### Phase 7 — Reorder favorites by drag
+### Phase 7 — Reorder favorites by drag ✅
 - Order = `config.favorites` Vec order. Bug to fix first: `filtered()`'s
   FAVORITES branch (app_group.rs:322–28) returns global entry order — must sort
   by position in `self.favorites`.
@@ -122,7 +122,7 @@ uses; backdrop clicks already closed it via `hide()`.
   a drop destination: dropping app id X on tile at index i ⇒ move X before i
   (`Message::ReorderFavorite`). Trailing drop zone appends to end.
 
-### Phase 8 — Custom-named folders that keep apps in Home
+### Phase 8 — Custom-named folders that keep apps in Home ✅
 Groups already have custom names; what's missing is "favorites-style" =
 non-exclusive. Add `keep_in_home: bool` (serde default false) to `AppGroup`;
 create-group dialog gets a toggle. HOME's filter must exclude ONLY apps in
@@ -130,13 +130,18 @@ groups with `keep_in_home == false` (HOME.filtered branch, app_group.rs:321).
 Old configs safe via serde default. Unlimited such folders = "multiple
 favorites".
 
-### Phase 9 — Frosted-blur bleed (upstream #387) — scoped after research
-Research agent findings recorded in HANDOFF; if the blur is compositor-side
-(cosmic-comp), the fix may not live in this repo — document + upstream instead.
+### Phase 9 — Frosted-blur bleed (upstream #387) ✅
+Root cause was in THIS repo, not cosmic-comp: `handle_overlap()` requested
+`BlurSurface` with an f32::MAX rectangle over the fullscreen layer surface.
+Fixed (bd929d9): blur rect = layer-padding origin + window size. Candidate
+for a second upstream PR (needs a master-based variant using literal 1200/690
+since window_width/height helpers are Phase 6 fork code).
 
-### Phase 10 — Upstream cherry-picks
-Adopt worthwhile open upstream PRs / implement small upstream-issue fixes per
-research-agent shortlist; keep each pick a separate commit for rebase sanity.
+### Phase 10 — Upstream cherry-picks ✅ (partial)
+Done: PR #385 stable entry ids (46339fe). Batch: #338 accent highlight,
+#306 clickable area, #235/335 long-name ellipsis (re-derived from draft PR
+#360). Skipped: #378 hide/unhide (conflicts, revisit), #381 translations,
+#179/66 stale. Upstream master fully synced as of 2026-07-18 — no rebase due.
 
 ## Delegation plan (per playbook §5)
 - **Main thread:** Phase 1 positioning math, Phase 2 power/DBus integration,
