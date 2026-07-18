@@ -456,19 +456,23 @@ impl CosmicAppLibrary {
         cmds.push(set_padding::<()>(SurfaceId::RESERVED, margin).discard());
         cmds.push(
             if self.core.system_theme().cosmic().frosted_system_interface {
-                // Blur only the visible window rect (surface-local coords match
-                // the layer padding), not the whole fullscreen layer surface —
-                // a MAX-sized region makes the compositor blur bleed past the
-                // window edges (upstream #387).
+                // Full-surface blur (frosted everywhere, upstream #387 bleed and
+                // all). A window-sized rect here does NOT work: this action's
+                // surface lookup misses the layer surface (the surface subsystem
+                // assigns its own runtime id, so the request parks in
+                // pending_blur and never reaches the compositor) — the frost
+                // actually comes from libcosmic's automatic EnableBlur path,
+                // which always uses a MAX rect. Tightening the region needs a
+                // different mechanism; see PLAN.md Phase 9.
                 task::effect(Action::PlatformSpecific(
                     platform_specific::Action::Wayland(
                         cosmic::iced::runtime::platform_specific::wayland::Action::BlurSurface(
                             SurfaceId::RESERVED,
                             Some(vec![Rectangle {
-                                x: margin.left as f32,
-                                y: margin.top as f32,
-                                width: self.window_width(),
-                                height: self.window_height(),
+                                x: 0.,
+                                y: 0.,
+                                width: f32::MAX,
+                                height: f32::MAX,
                             }]),
                         ),
                     ),
@@ -600,6 +604,10 @@ enum Message {
     FilterApps(String, Vec<Arc<DesktopEntryData>>),
     OpenContextMenu(Rectangle, usize),
     CloseContextMenu,
+    /// Close the header power popover. Separate from `CloseContextMenu` and
+    /// fired on mouse RELEASE: closing on press destroys the popover before
+    /// its buttons (which emit on release) can deliver their action.
+    ClosePowerMenu,
     OpenSettings,
     ToggleFavorite(usize),
     TogglePowerMenu,
@@ -1188,8 +1196,10 @@ impl cosmic::Application for CosmicAppLibrary {
             }
             Message::CloseContextMenu => {
                 self.menu = None;
-                self.power_menu_open = false;
                 return commands::popup::destroy_popup(*MENU_ID);
+            }
+            Message::ClosePowerMenu => {
+                self.power_menu_open = false;
             }
             Message::ToggleFavorite(i) => {
                 self.menu = None;
@@ -1295,7 +1305,13 @@ impl cosmic::Application for CosmicAppLibrary {
                 self.dnd_icon = Some(i);
             }
             Message::FinishDrag(copy) => {
-                if !copy
+                // In the Favorites view a finished drag is a reorder — the tile
+                // drop targets already handled it via ReorderFavorite. The
+                // "moved to a group" removal below must not run there, or the
+                // favorite is deleted right after it was reordered.
+                if self.cur_group == Some(FAVORITES_GROUP) {
+                    self.dnd_icon = None;
+                } else if !copy
                     && let Some(info) = self
                         .dnd_icon
                         .take()
@@ -1741,7 +1757,7 @@ impl cosmic::Application for CosmicAppLibrary {
                     .popup(power_menu)
                     .position(popover::Position::Bottom)
                     .modal(true)
-                    .on_close(Message::TogglePowerMenu)
+                    .on_close(Message::ClosePowerMenu)
                     .into()
             } else {
                 tooltip(power_button, text(fl!("power")), tooltip::Position::Bottom).into()
@@ -2112,7 +2128,9 @@ impl cosmic::Application for CosmicAppLibrary {
             })))
             .center_x(Length::Fill)
             .width(Length::Fixed(window_width));
-        let window = mouse_area(window).on_press(Message::CloseContextMenu);
+        let window = mouse_area(window)
+            .on_press(Message::CloseContextMenu)
+            .on_release(Message::ClosePowerMenu);
         let positioned = match self.effective_position() {
             LibraryPosition::Bottom => column!(
                 space::vertical().height(Length::Fill),
