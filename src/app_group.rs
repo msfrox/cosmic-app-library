@@ -187,6 +187,8 @@ pub enum LibraryPosition {
     Top,
     /// Always anchor to the bottom of the screen.
     Bottom,
+    /// Always float vertically centered on the screen.
+    Center,
 }
 
 impl Default for LibraryPosition {
@@ -204,6 +206,20 @@ pub struct AppLibraryConfig {
     /// App IDs in the built-in Favorites group.
     #[serde(default)]
     pub favorites: Vec<String>,
+    /// Width of the app library window, in logical pixels.
+    #[serde(default = "default_window_width")]
+    pub window_width: f32,
+    /// Height of the app library window, in logical pixels.
+    #[serde(default = "default_window_height")]
+    pub window_height: f32,
+}
+
+fn default_window_width() -> f32 {
+    1200.0
+}
+
+fn default_window_height() -> f32 {
+    690.0
 }
 
 impl AppLibraryConfig {
@@ -390,6 +406,8 @@ impl Default for AppLibraryConfig {
             ],
             position: LibraryPosition::default(),
             favorites: Vec::new(),
+            window_width: default_window_width(),
+            window_height: default_window_height(),
         }
     }
 }

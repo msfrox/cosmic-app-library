@@ -482,6 +482,7 @@ impl CosmicAppLibrary {
         match self.config.position {
             LibraryPosition::Top => LibraryPosition::Top,
             LibraryPosition::Bottom => LibraryPosition::Bottom,
+            LibraryPosition::Center => LibraryPosition::Center,
             // Auto: open from the bottom only when there is a bottom dock and no
             // top panel, so the default top-panel layout is unchanged.
             LibraryPosition::Auto => {
@@ -494,18 +495,38 @@ impl CosmicAppLibrary {
         }
     }
 
+    /// Configured window width, clamped to a sane minimum and to the screen size.
+    fn window_width(&self) -> f32 {
+        self.config
+            .window_width
+            .clamp(600.0, self.size.width.max(600.0))
+    }
+
+    /// Configured window height, clamped to a sane minimum and to the screen size.
+    fn window_height(&self) -> f32 {
+        self.config
+            .window_height
+            .clamp(400.0, self.size.height.max(400.0))
+    }
+
     #[allow(clippy::cast_possible_truncation)]
     fn layer_padding(&self) -> IcedMargin {
-        let horizontal = ((self.size.width - 1200.) / 2.).max(0.) as i32;
+        let width = self.window_width();
+        let height = self.window_height();
+        let horizontal = ((self.size.width - width) / 2.).max(0.) as i32;
         let (top, bottom) = match self.effective_position() {
             LibraryPosition::Bottom => (
-                (self.size.height - 690. - 16. - self.bottom_margin).max(0.) as i32,
+                (self.size.height - height - 16. - self.bottom_margin).max(0.) as i32,
                 self.bottom_margin as i32 + 16,
             ),
+            LibraryPosition::Center => {
+                let symmetric = ((self.size.height - height) / 2.).max(0.) as i32;
+                (symmetric, symmetric)
+            }
             // Top (and any resolved non-bottom).
             _ => (
                 self.margin as i32 + 16,
-                (self.size.height - 690. - 16. - self.margin).max(0.) as i32,
+                (self.size.height - height - 16. - self.margin).max(0.) as i32,
             ),
         };
         IcedMargin {
@@ -1951,10 +1972,12 @@ impl cosmic::Application for CosmicAppLibrary {
         ]
         .align_x(Alignment::Center);
 
+        let window_width = self.window_width();
+        let window_height = self.window_height();
         let window = container(content)
-            .height(Length::Fixed(690.))
-            .max_height(690)
-            .max_width(1200.0)
+            .height(Length::Fixed(window_height))
+            .max_height(window_height)
+            .max_width(window_width)
             .class(theme::Container::Custom(Box::new(|theme| {
                 let t = theme.cosmic();
                 let radii = t.radius_s().map(|x| if x < 4.0 { x } else { x + 4.0 });
@@ -1973,13 +1996,18 @@ impl cosmic::Application for CosmicAppLibrary {
                 }
             })))
             .center_x(Length::Fill)
-            .width(Length::Fixed(1200.));
+            .width(Length::Fixed(window_width));
         let window = mouse_area(window).on_press(Message::CloseContextMenu);
         let positioned = match self.effective_position() {
             LibraryPosition::Bottom => column!(
                 space::vertical().height(Length::Fill),
                 window,
                 space::vertical().height(Length::Fixed(self.bottom_margin + 16.)),
+            ),
+            LibraryPosition::Center => column!(
+                space::vertical().height(Length::Fill),
+                window,
+                space::vertical().height(Length::Fill),
             ),
             _ => column!(
                 space::vertical().height(Length::Fixed(self.margin + 16.)),
