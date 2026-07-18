@@ -16,16 +16,30 @@ Relaunch the app library (Super key / panel button) to pick up the new binary.
 sudo pacman -S cosmic-app-library     # restores the official binary
 ```
 
-## Update conflict (important)
+## Permanent install (recommended): PKGBUILD
+`packaging/PKGBUILD` builds `cosmic-app-library-msfrox` from the GitHub fork's
+`dev` branch. It `provides`/`conflicts` the official `cosmic-app-library`, so
+installing it REPLACES the official package and `pacman -Syu` never clobbers
+the fork (different pkgname). Push `dev` first — it builds from GitHub.
+```
+cd ~/Projects/cosmic-app-library/packaging
+makepkg -si          # builds and installs, replacing cosmic-app-library
+```
+To update later: push `dev`, then re-run `makepkg -si` (pkgver auto-bumps from
+git). To go back to the official package:
+```
+sudo pacman -S cosmic-app-library     # pacman swaps the fork back out
+```
+
+## Update conflict (if using bare `just install` instead)
 `just install` writes to the same `/usr/bin` path as the official package, so a
-`pacman -Syu` that updates `cosmic-app-library` will overwrite the fork. Options:
-- Re-run `sudo just install` after such updates, OR
-- Phase 4: build a PKGBUILD (`cosmic-app-library-msfrox`) and add `cosmic-app-library`
-  to `IgnorePkg` in `/etc/pacman.conf` (or replace via `provides`/`conflicts`).
+`pacman -Syu` that updates `cosmic-app-library` will overwrite the fork —
+re-run `sudo just install` after such updates, or use the PKGBUILD above.
 
 ## Upstream PR (Phase 1)
-- Push `feat/library-position` to `origin`, open PR to `pop-os/cosmic-app-library`
-  referencing issue #336. Keep that branch scoped to position only.
+Open: https://github.com/pop-os/cosmic-app-library/pull/388 (fixes #336, from
+`feat/library-position`). Keep that branch scoped to position only; rebase on
+upstream if requested by reviewers.
 
 ## Secrets
 None. Desktop app with no credentials — no SECRETS-LOG.md.

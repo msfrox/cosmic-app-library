@@ -73,45 +73,31 @@ Remotes: `origin` = msfrox/cosmic-app-library (fork), `upstream` = pop-os.
       system binary. Deferred: owner's live COSMIC session; owner to run when ready.
       Rollback: `sudo pacman -S cosmic-app-library`.
 
-### Phase 1 — Top/bottom position (issue #336) ✅ (code) / ⬜ (verify + PR)
-Branch `feat/library-position` off `master`; merged into `dev`.
-- [x] `LibraryPosition` config key `Auto | Top | Bottom` (default `Auto`) on
-      `AppLibraryConfig`. Set via `~/.config/cosmic/com.system76.CosmicAppLibrary/v1/position`
-      (plain text: `Top`/`Bottom`/`Auto`).
-- [x] `Auto`: bottom only when a bottom dock exists AND no top panel (else top),
-      so default top-panel layouts are unchanged.
-- [x] `handle_overlap()` computes `bottom_margin`; `layer_padding()` + view spacer
-      branch on `effective_position()`.
-- [x] Compiles clean (only pre-existing warnings).
-- [ ] On-device verify: top panel + bottom override; and a bottom-dock-only setup.
-- [ ] Open PR to pop-os referencing #336.
-- **Scope contract:** position only. Minimal, upstream-friendly diff. ✅ held.
+### Phase 1 — Top/bottom position (issue #336) ✅
+Config key `Auto|Top|Bottom`, auto-follow dock, bottom-margin overlap fix.
+PR open: https://github.com/pop-os/cosmic-app-library/pull/388 (both position
+fixes cherry-picked onto `feat/library-position`). Verified on owner's desktop.
 
-### Phase 2 — Header: Settings + Power ⬜
-On `dev`.
-- [ ] Add a header row to the right of the 96px search bar (top_row) with a
-      Settings icon and a Power icon.
-- [ ] Settings icon → spawn `cosmic-settings` (tokio process) and dismiss library.
-- [ ] Copy `session_manager.rs` + `cosmic_session.rs` into `src/power/`; expose an
-      inline power menu (lock, suspend, restart, shut down, log out) with the same
-      confirmation behavior as the applet.
-- [ ] Match spacing/iconography to the COSMIC theme (not pixel-copy Andromeda).
-- **Scope contract:** header + power menu. Favorites is Phase 3.
+### Phase 2 — Header: Settings + Power ✅
+Home header right of search: Settings icon (launches cosmic-settings via
+activation token, dismisses library) + Power icon → inline popover menu
+(lock/suspend/log out/restart/shut down). Power actions = applet's DBus code in
+`src/power/`; confirmations via cosmic-osd with direct-DBus fallback.
+New dep: logind-zbus; nix "user" feature.
 
-### Phase 3 — Favorites ⬜
-On `dev`.
-- [ ] Add a special built-in `Favorites` group alongside `HOME`.
-- [ ] Select Favorites by default on open (adjust `activate()` `cur_group`).
-- [ ] Add context-menu items "Add to Favorites" / "Remove from Favorites" on app
-      icons in every view (reuse existing OpenContextMenu; call add/remove_entry).
-- [ ] Persist via existing config; handle empty-favorites empty state.
-- **Scope contract:** favorites group + context action + default view.
+### Phase 3 — Favorites ✅
+`favorites: Vec<String>` on config (separate from groups so Home still shows
+favorited apps), sentinel index `FAVORITES_GROUP = usize::MAX`, locked group
+button next to Home (drag-to-add works), context-menu Add/Remove from
+Favorites, opens on Favorites when non-empty else Home, search inside
+Favorites searches all apps, empty-state hint.
 
-### Phase 4 — Polish & packaging ⬜
-- [ ] PKGBUILD for CachyOS/Arch (`cosmic-app-library-msfrox`) so updates don't get
-      clobbered by the official package; document pin/override in DEPLOY.md.
-- [ ] Final HANDOFF.md + DEPLOY.md pass; screenshots.
-- [ ] Confirm Phase 1 PR status; rebase if upstream moved.
+### Phase 4 — Polish & packaging ✅ (code+docs) / ⬜ (owner: makepkg + verify)
+- [x] `packaging/PKGBUILD` (`cosmic-app-library-msfrox`, provides/conflicts the
+      official pkg, builds from GitHub `dev`); DEPLOY.md documents it.
+- [x] Final HANDOFF.md + DEPLOY.md pass.
+- [ ] Owner: on-device verify Phases 2+3, run `makepkg -si`, screenshots.
+- [ ] Watch Phase 1 PR; rebase if upstream moves.
 
 ## Delegation plan (per playbook §5)
 - **Main thread:** Phase 1 positioning math, Phase 2 power/DBus integration,

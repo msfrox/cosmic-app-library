@@ -1,0 +1,46 @@
+# Maintainer: Shehan Feroze <msfrox@gmail.com>
+# Personal fork of pop-os/cosmic-app-library with:
+#  - top/bottom open position (PR'd upstream, issue #336)
+#  - header with Settings button + inline Power menu
+#  - built-in Favorites group
+# Replaces the official cosmic-app-library package so pacman updates
+# never clobber the fork binary in /usr/bin.
+
+pkgname=cosmic-app-library-msfrox
+pkgver=1.0.12.r0
+pkgrel=1
+pkgdesc="COSMIC app library (msfrox fork: position, power menu, favorites)"
+arch=('x86_64')
+url="https://github.com/msfrox/cosmic-app-library"
+license=('GPL-3.0-only')
+depends=('cosmic-icon-theme' 'libgcc' 'glibc' 'libxkbcommon')
+makedepends=('cargo' 'git' 'just')
+# Match the official package's epoch (1:) so provides= satisfies any
+# versioned dependency from COSMIC meta/session packages.
+epoch=1
+provides=('cosmic-app-library=1:1.3.0')
+conflicts=('cosmic-app-library')
+source=("git+https://github.com/msfrox/cosmic-app-library.git#branch=dev")
+sha256sums=('SKIP')
+
+pkgver() {
+  cd cosmic-app-library
+  printf "1.0.12.r%s.g%s" "$(git rev-list --count HEAD)" "$(git rev-parse --short HEAD)"
+}
+
+prepare() {
+  cd cosmic-app-library
+  export RUSTUP_TOOLCHAIN=stable
+  cargo fetch --locked --target "$(rustc -vV | sed -n 's/host: //p')"
+}
+
+build() {
+  cd cosmic-app-library
+  export RUSTUP_TOOLCHAIN=stable
+  just build-release --frozen --offline
+}
+
+package() {
+  cd cosmic-app-library
+  just rootdir="$pkgdir" install
+}

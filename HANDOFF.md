@@ -3,40 +3,40 @@
 Resume line: *"Continue cosmic-app-library. Read PLAN.md and HANDOFF.md in
 ~/Projects/cosmic-app-library and do the next step."* Start with that dir as cwd.
 
-## Current state (2026-07-17)
-- Public fork `origin` = github.com/msfrox/cosmic-app-library, `upstream` = pop-os.
-- Branches: `master` (upstream mirror @ ce33b9e), `dev` (integration, current),
-  `feat/library-position` (Phase 1, merged into dev).
-- **Phase 0 done:** unmodified fork builds (`just build-release`, ~1m22s, 45MB bin).
-- **Phase 1 code done & committed on `dev`:** top/bottom open position.
-  - `LibraryPosition { Auto, Top, Bottom }` added to `AppLibraryConfig`
-    (src/app_group.rs). Set via config file
-    `~/.config/cosmic/com.system76.CosmicAppLibrary/v1/position` (plain text
-    `Top` / `Bottom` / `Auto`). No in-app UI toggle yet.
-  - src/app.rs: `bottom_margin` field, `effective_position()`, `handle_overlap()`
-    bottom detection, `layer_padding()` + view spacer branch on position.
-- **Bottom-overlap bug FIXED & installed (5aa51ee).** The overlap sensor
-  (`cosmic_launcher_dummy` layer surface) was anchored TOP at fixed 1200x200, so
-  it never overlapped a bottom panel → `bottom_margin` stayed 0 → library dropped
-  onto the panel. Now anchored `Anchor::all()` + size `(None,None)` (fullscreen).
-  Verified on owner's desktop: 78px bottom panel → `bottom_margin=78`, library
-  floats above. Clean binary installed to `/usr/bin` via `sudo just install`.
-- Nothing pushed to origin yet.
+## Current state (2026-07-18)
+- ALL FOUR PHASES CODE-COMPLETE on `dev`; everything compiles clean (only the
+  two pre-existing unused-import warnings).
+- **Phase 1 upstream PR is OPEN:** https://github.com/pop-os/cosmic-app-library/pull/388
+  (fixes #336). `feat/library-position` = feature + both position fixes
+  cherry-picked (f4bcf5d, c3c9cef), pushed to origin.
+- **Phase 2 (0de8981):** home header right of search — Settings icon (launches
+  cosmic-settings, dismisses library) + Power icon → inline popover menu.
+  Power DBus code copied from cosmic-applet-power into `src/power/`;
+  log out/restart/shutdown confirm via cosmic-osd (DBus fallback),
+  lock/suspend immediate. New deps: logind-zbus, nix "user" feature.
+- **Phase 3 (b91dc02):** Favorites — `favorites: Vec<String>` on config,
+  sentinel `FAVORITES_GROUP = usize::MAX` (branches in add_entry/remove_entry/
+  filtered), locked group button next to Home, context-menu Add/Remove from
+  Favorites, drag-to-add, opens on Favorites when non-empty else Home,
+  search in Favorites = global search, empty-state hint.
+- **Phase 4:** `packaging/PKGBUILD` (`cosmic-app-library-msfrox`,
+  provides/conflicts official pkg, builds from GitHub `dev`). DEPLOY.md updated.
 
-## Next step
-1. Phase 2 (header: Settings + Power) on `dev`.
-2. Open the Phase 1 upstream PR (push `feat/library-position`, PR to pop-os,
-   ref #336). NOTE: the sensor-anchor fix (5aa51ee) landed on `dev`, not on
-   `feat/library-position` — cherry-pick it onto that branch before the PR, since
-   bottom detection is broken without it.
+## Next step (owner, on-device)
+1. Verify Phase 2+3 in live session: relaunch library; check header buttons,
+   power menu actions, favorites add/remove/drag, default-open behavior.
+   (A fresh `just build-release` binary + `sudo just install` gets it live, or
+   `cd packaging && makepkg -si` for the permanent package.)
+2. Comment/respond on PR #388 if pop-os reviews.
+3. Optional polish (BACKLOG): position toggle UI, favorites in folder views.
 
 ## Gotchas (stable)
-- `just install` overwrites `/usr/bin/cosmic-app-library`; pacman updates clobber
-  it until Phase 4's PKGBUILD. Rollback = `sudo pacman -S cosmic-app-library`.
-- Keep `master` clean (upstream mirror). Phase 1 = `feat/library-position` off
-  master for a tidy PR; other features on `dev`.
-- cosmic-config unit enums store as plain text files (verified against existing
-  configs). Missing `position` key → defaults to `Auto` (safe for old configs).
-- Default COSMIC (top panel + bottom dock) → `Auto` resolves to **Top** (no
-  regression). Bottom needs the explicit override.
+- PKGBUILD builds from GitHub `dev` — push before `makepkg`.
+- Bare `just install` gets clobbered by pacman updates; the PKGBUILD replaces
+  the official package and doesn't. Rollback: `sudo pacman -S cosmic-app-library`.
+- Keep `master` = upstream mirror; `feat/library-position` = PR branch only.
+- cosmic-config enums store as plain text; missing keys → serde defaults
+  (`position` → Auto, `favorites` → empty), so old configs are safe.
+- Favorites deliberately NOT in `config.groups` — Home's filter excludes apps
+  matched by any group, so a favorites group there would hide apps from Home.
 - No secrets in this project.
