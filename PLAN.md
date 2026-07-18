@@ -221,6 +221,12 @@ sizing (Phase 6 keys) is replaced by derived sizing:
 - i18n (en): library-settings, position, position-auto/top/bottom/center,
   grid-columns, grid-rows.
 
+### Phase 14 — Header-button visibility toggles ✅ (code) / ⬜ (verify)
+`show_settings_button`/`show_power_button` config bools (serde default true),
+togglers on the settings page, header row uses `push_maybe`. Hiding the power
+button force-closes an open power menu; the library-settings gear is always
+visible so the page stays reachable.
+
 ## Delegation plan (per playbook §5)
 - **Main thread:** Phase 1 positioning math, Phase 2 power/DBus integration,
   anything touching layer-shell/iced surfaces. Judgment-heavy on unfamiliar libcosmic.

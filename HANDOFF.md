@@ -4,8 +4,11 @@ Resume line: *"Continue cosmic-app-library. Read PLAN.md and HANDOFF.md in
 ~/Projects/cosmic-app-library and do the next step."* Start with that dir as cwd.
 
 ## Current state (2026-07-19, session 4)
-- Phases 0–13 CODE-COMPLETE on `dev`; release build passes. Phases 11–13 are
+- Phases 0–14 CODE-COMPLETE on `dev`; release build passes. Phases 11–14 are
   NOT yet owner-verified live.
+- Phase 14 (dd36357): settings-page togglers hide the header Settings/Power
+  buttons (`show_settings_button`/`show_power_button`, serde default true;
+  gear icon always visible; hiding power closes an open power menu).
 - Phase 12 (5e6951c): favorites positional drops. Each favorites cell = three
   sibling dnd destinations: 24px strips flanking the tile insert-reorder
   before/after (accent insertion-bar hover hint); the tile itself creates or
@@ -31,11 +34,11 @@ Resume line: *"Continue cosmic-app-library. Read PLAN.md and HANDOFF.md in
    ungroups, auto-dissolve; (b) settings page — gear icon opens it, position
    dropdown moves the library live, columns/rows resize live, ESC backs out;
    (c) keyboard up/down row nav still lands on the right tiles after changing
-   columns; (d) Home folders + power menu + blur unregressed.
+   columns; (d) Home folders + power menu + blur unregressed; (e) header
+   togglers hide/show Settings and Power buttons.
 2. Watch PR #389; rebase if upstream moves.
-3. BACKLOG: header-button toggles (settings page can host), folder-tile
-   reorder, Phase 9 tight blur region, dock-pin sync, upstream picks
-   (#378/#153/#386/#381).
+3. BACKLOG: folder-tile reorder, Phase 9 tight blur region, dock-pin sync,
+   upstream picks (#378/#153/#386/#381).
 
 ## Gotchas (stable)
 - PKGBUILD builds from GitHub `dev` — push before `makepkg`.

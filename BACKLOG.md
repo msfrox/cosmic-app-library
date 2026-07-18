@@ -1,8 +1,6 @@
 # BACKLOG — later ideas (out of current scope)
 
 - Left/right open positions (not just top/bottom) — matches issue #336's full ask.
-- Configurable header: toggle Settings/Power buttons on or off (settings page
-  now exists to host these toggles).
 - Frosted-blur tight region (upstream #387): use core.main_window_id() as the
   BlurSurface id + real output size — see PLAN.md Phase 9 findings.
 - Sync favorites with the dock's pinned apps (cosmic-app-list-config).
@@ -17,4 +15,5 @@
 ## Done (moved to PLAN.md phases)
 - ~~Center/floating position~~ (Phase 6) · ~~reorder favorites~~ (Phase 7) ·
   ~~multiple favorite-style groups~~ (Phases 8+11 folders) · ~~drop-to-combine
-  in favorites~~ (Phase 12) · ~~resize + settings page~~ (Phase 13)
+  in favorites~~ (Phase 12) · ~~resize + settings page~~ (Phase 13) ·
+  ~~header button toggles~~ (Phase 14)
