@@ -449,15 +449,19 @@ impl CosmicAppLibrary {
         cmds.push(set_padding::<()>(SurfaceId::RESERVED, margin).discard());
         cmds.push(
             if self.core.system_theme().cosmic().frosted_system_interface {
+                // Blur only the visible window rect (surface-local coords match
+                // the layer padding), not the whole fullscreen layer surface —
+                // a MAX-sized region makes the compositor blur bleed past the
+                // window edges (upstream #387).
                 task::effect(Action::PlatformSpecific(
                     platform_specific::Action::Wayland(
                         cosmic::iced::runtime::platform_specific::wayland::Action::BlurSurface(
                             SurfaceId::RESERVED,
                             Some(vec![Rectangle {
-                                x: 0.,
-                                y: 0.,
-                                width: f32::MAX,
-                                height: f32::MAX,
+                                x: margin.left as f32,
+                                y: margin.top as f32,
+                                width: self.window_width(),
+                                height: self.window_height(),
                             }]),
                         ),
                     ),
