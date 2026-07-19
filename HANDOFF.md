@@ -3,9 +3,18 @@
 Resume line: *"Continue cosmic-app-library. Read PLAN.md and HANDOFF.md in
 ~/Projects/cosmic-app-library and do the next step."* Start with that dir as cwd.
 
-## Current state (2026-07-19, session 4)
-- Phases 0–14 CODE-COMPLETE on `dev`; release build passes. Phases 11–14 are
-  NOT yet owner-verified live.
+## Current state (2026-07-19, session 5)
+- Phases 0–15 CODE-COMPLETE on `dev`; release build + `cargo test` (5) pass.
+  Phases 11–15 are NOT yet owner-verified live — nothing has been installed
+  from this session (sudo needs a password in the agent shell).
+- Phase 15: power-menu close-on-outside-click regression fixed (libcosmic's
+  modal popover now swallows every mouse event, so the ancestor mouse_area
+  `on_release` never fired — switched to `modal(false)` + `on_close`, and app
+  tiles go unclickable while the menu is open so the dismissing click can't
+  launch anything); COSMIC Settings launcher icon changed to
+  `com.system76.CosmicSettings` (it was the identical gear to Library
+  Settings); folder tiles drag-reorder; `default_page` setting (Auto/Home/
+  Favorites).
 - Phase 14 (dd36357): settings-page togglers hide the header Settings/Power
   buttons (`show_settings_button`/`show_power_button`, serde default true;
   gear icon always visible; hiding power closes an open power menu).
@@ -28,17 +37,27 @@ Resume line: *"Continue cosmic-app-library. Read PLAN.md and HANDOFF.md in
   BlurSurface(RESERVED) never reaches the wire; self.size can stay 1920×1080.
 
 ## Next step
-1. Owner: push is done; `just build-release && sudo just install`, then verify
-   live: (a) favorites drag — strips reorder with accent bar, drop-on-tile
-   creates a favorites folder with accent highlight, folder tile opens/renames/
-   ungroups, auto-dissolve; (b) settings page — gear icon opens it, position
-   dropdown moves the library live, columns/rows resize live, ESC backs out;
-   (c) keyboard up/down row nav still lands on the right tiles after changing
-   columns; (d) Home folders + power menu + blur unregressed; (e) header
-   togglers hide/show Settings and Power buttons.
+1. Owner: `just build-release && sudo just install`, relaunch, then verify live.
+   **Phase 15 (new, highest risk):**
+   - (a) Power menu: open it, click on empty library background → closes. Click
+     an app tile while it's open → menu closes and the app does NOT launch.
+     Click the power button again → toggles shut. Menu items still work.
+     *This is the one to watch — the fix depends on iced's overlay/capture
+     ordering, which couldn't be exercised without a live session.*
+   - (b) Header: Library Settings gear and the COSMIC Settings toggle icon are
+     now visually distinct; the latter still launches cosmic-settings.
+   - (c) Folder reorder: drag one folder tile onto another → it moves to that
+     position, order survives a reopen. Dragging a folder onto an app tile or
+     a favorites gap does nothing (no folder created, no favorite inserted).
+     Dragging an *app* onto a folder still adds it to the folder.
+   - (d) Settings → "Open on": Home / Favorites / Auto each pick the right
+     starting view on next open.
+   **Phases 11–14 (still unverified):** favorites drag strips + drop-to-combine;
+   settings page position/columns/rows live-apply + ESC; keyboard row nav after
+   a column change; header show/hide togglers.
 2. Watch PR #389; rebase if upstream moves.
-3. BACKLOG: folder-tile reorder, Phase 9 tight blur region, dock-pin sync,
-   upstream picks (#378/#153/#386/#381).
+3. BACKLOG: Phase 9 tight blur region (owner deferred — do this next), dock-pin
+   sync, Home/in-folder app reorder, upstream picks (#378/#153/#386/#381).
 
 ## Gotchas (stable)
 - PKGBUILD builds from GitHub `dev` — push before `makepkg`.
@@ -54,6 +73,14 @@ Resume line: *"Continue cosmic-app-library. Read PLAN.md and HANDOFF.md in
 - Drag-id bases: favorites tiles 1_000_000, Home tiles 2_000_000 (create
   folder), favorites reorder strips 3_000_000 (+2i left, +2i+1 right), folder
   tiles 4_000_000.
+- Every dnd payload here is the same `AppletString` (text/uri-list) mime, so a
+  drop can't tell from its data whether a folder or an app was dragged. That's
+  what `dragging_folder: Option<usize>` is for — destination closures capture
+  it at view-build time. If you add a drop destination, decide what it should
+  do when a folder is being dragged (usually `Message::IgnoredDrop`).
+- Don't make the power popover `modal(true)` again: libcosmic captures all
+  mouse events for modal popups, which kills both click-outside-to-close and
+  `on_close`. See PLAN Phase 15.
 - An app lives in ≤1 folder; add_to_folder recomputes the target index if
   removing the app dissolves an earlier folder.
 - cosmic-session auto-respawns the installed daemon if killed; single

@@ -227,6 +227,41 @@ togglers on the settings page, header row uses `push_maybe`. Hiding the power
 button force-closes an open power menu; the library-settings gear is always
 visible so the page stays reachable.
 
+### Phase 15 — Power-menu regression, distinct icons, folder reorder, default page ✅ (code) / ⬜ (verify)
+- **Power menu close-on-outside-click (regression).** Cause was upstream, not
+  ours: libcosmic's `popover::update` now does `shell.capture_event()` for
+  *every* mouse event while a **modal** popup is open, so the release could no
+  longer bubble to the ancestor `mouse_area(window).on_release(ClosePowerMenu)`
+  added in dbd6a0f — and `on_close` is in the `else` arm, so a modal popover
+  never publishes it either. The menu became dismissable only via its own
+  button. Fix: `modal(false)` + `on_close`, which publishes on any press
+  outside the button's bounds; the dead `on_release` is removed. Because a
+  non-modal popup no longer blocks the content behind it, app tiles take
+  `on_press = None` while `power_menu_open`, so a dismissing click can't also
+  launch the app underneath.
+- **Header icons.** `preferences-system-symbolic` (COSMIC Settings launcher)
+  and `emblem-system-symbolic` (Library Settings) are the *same gear glyph* —
+  verified by rendering both. The launcher now uses the `com.system76.
+  CosmicSettings` app icon (toggle-in-a-circle), so the two buttons read
+  differently. It is a colour icon among symbolic ones by design — it's the
+  icon COSMIC Settings itself uses.
+- **Folder reorder (was BACKLOG).** Folder tiles become `dnd_source`s as well
+  as destinations; dropping folder A on folder B moves A to B's index.
+  Everything on the wire is one `AppletString` mime, so the payload can't say
+  "this is a folder" — `dragging_folder: Option<usize>` (set by `on_start`,
+  cleared on finish/cancel/hide/drop) is read at view-build time by every
+  destination closure instead. Folder drops on app tiles / favourites strips /
+  the append zone resolve to `Message::IgnoredDrop`. `reorder_folder(from, to)`
+  moves within the global `folders` vec; since a view's tiles are just that vec
+  filtered by `in_favorites`, the other view's relative order is untouched
+  (unit-tested).
+- **Default opening page.** `DefaultPage { Auto, Home, Favorites }` config enum
+  (serde default `Auto` = the old favorites-if-any behaviour), dropdown on the
+  settings page above Columns/Rows. i18n: `default-page`, `default-page-auto`.
+- First unit tests in the repo (`src/app_group.rs`): 5 covering
+  `reorder_folder` index-shifting and the `DefaultPage` default.
+- NOT addressed (owner deferred): frosted-blur tight region.
+
 ## Delegation plan (per playbook §5)
 - **Main thread:** Phase 1 positioning math, Phase 2 power/DBus integration,
   anything touching layer-shell/iced surfaces. Judgment-heavy on unfamiliar libcosmic.

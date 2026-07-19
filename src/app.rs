@@ -55,6 +55,7 @@ use cosmic::{
                 self,
                 focusable::{find_focused, focus},
             },
+            widget::tree,
             window::Id as SurfaceId,
         },
         platform_specific::shell::wayland::commands::{
@@ -79,9 +80,9 @@ use cosmic::{
     widget::{
         self, Column,
         autosize::autosize,
-        button,
-        divider,
+        button, divider,
         dnd_destination::dnd_destination_for_data,
+        dnd_source,
         icon::{self, from_name},
         popover::{self, popover},
         scrollable, search_input, space, svg, text, text_input, tooltip,
@@ -94,7 +95,9 @@ use sctk::shell::wlr_layer;
 use serde::{Deserialize, Serialize};
 use switcheroo_control::Gpu;
 
-use crate::app_group::{AppFolder, AppGroup, AppLibraryConfig, FAVORITES_GROUP, LibraryPosition};
+use crate::app_group::{
+    AppFolder, AppGroup, AppLibraryConfig, DefaultPage, FAVORITES_GROUP, LibraryPosition,
+};
 use crate::fl;
 use crate::power::PowerAction;
 use crate::subscriptions::desktop_files::desktop_files;
@@ -131,6 +134,16 @@ static POSITION_LABELS: LazyLock<Vec<String>> = LazyLock::new(|| {
         fl!("position-top"),
         fl!("position-bottom"),
         fl!("position-center"),
+    ]
+});
+
+/// Labels for the library-settings default-page dropdown, indexed the same way
+/// as `Message::SetDefaultPage` (0 = Auto, 1 = Home, 2 = Favorites).
+static DEFAULT_PAGE_LABELS: LazyLock<Vec<String>> = LazyLock::new(|| {
+    vec![
+        fl!("default-page-auto"),
+        fl!("cosmic-library-home"),
+        fl!("favorites"),
     ]
 });
 
@@ -275,6 +288,11 @@ struct CosmicAppLibrary {
     all_entries: Vec<Arc<DesktopEntryData>>,
     menu: Option<usize>,
     power_menu_open: bool,
+    /// Global `config.folders` index of the folder tile currently being
+    /// dragged, if any. Drop destinations read this at view-build time to tell
+    /// a folder drag (reorder) apart from an app drag (add-to-folder), since
+    /// both travel over the wire as the same `AppletString` mime type.
+    dragging_folder: Option<usize>,
     helper: Option<Config>,
     config: AppLibraryConfig,
     cur_group: Option<usize>,
@@ -328,6 +346,7 @@ impl Default for CosmicAppLibrary {
             all_entries: Default::default(),
             menu: Default::default(),
             power_menu_open: false,
+            dragging_folder: None,
             helper: Default::default(),
             config: Default::default(),
             cur_group: Default::default(),
@@ -430,8 +449,12 @@ impl CosmicAppLibrary {
             self.edit_name = None;
             self.search_value = "".to_string();
             self.scroll_offset = 0.0;
-            // Open on Favorites when any exist, otherwise Home.
-            self.cur_group = (!self.config.favorites.is_empty()).then_some(FAVORITES_GROUP);
+            self.cur_group = match self.config.default_page {
+                DefaultPage::Home => None,
+                DefaultPage::Favorites => Some(FAVORITES_GROUP),
+                // Favorites when any exist, otherwise Home.
+                DefaultPage::Auto => (!self.config.favorites.is_empty()).then_some(FAVORITES_GROUP),
+            };
             self.load_apps();
             self.needs_clear = true;
             let fetch_gpus = Task::perform(try_get_gpus(), |gpus| {
@@ -484,9 +507,7 @@ impl CosmicAppLibrary {
         for o in self.overlap.values() {
             if o.y >= mid_height {
                 let edge_gap = (self.size.height - (o.y + o.height)).max(0.);
-                self.bottom_margin = self
-                    .bottom_margin
-                    .max(self.size.height - o.y + edge_gap);
+                self.bottom_margin = self.bottom_margin.max(self.size.height - o.y + edge_gap);
             }
         }
 
@@ -682,6 +703,18 @@ enum Message {
     CancelDrag,
     FavDragEnter(usize, FavDropZone),
     FavDragLeave(usize, FavDropZone),
+    /// A folder tile drag started/ended — sets/clears `dragging_folder` so
+    /// drop destinations can distinguish it from an app drag.
+    StartFolderDrag(usize),
+    EndFolderDrag,
+    /// Move the folder at `config.folders[from]` to index `to`.
+    ReorderFolder {
+        from: usize,
+        to: usize,
+    },
+    /// A drop that isn't meaningful for the thing being dragged (e.g. a
+    /// folder released on an app tile). Deliberately does nothing.
+    IgnoredDrop,
     StartDndOffer(Option<usize>),
     FinishDndOffer(Option<usize>, Option<DesktopEntryData>),
     LeaveDndOffer(Option<usize>),
@@ -719,6 +752,8 @@ enum Message {
     ToggleLibrarySettings,
     /// Set `config.position` from a dropdown index (0..=3).
     SetPosition(usize),
+    /// Set `config.default_page` from a dropdown index (0..=2).
+    SetDefaultPage(usize),
     /// Set `config.grid_columns`.
     SetGridColumns(u32),
     /// Set `config.grid_rows`.
@@ -828,14 +863,61 @@ impl CosmicAppLibrary {
             .padding(space_s)
             .on_press(Message::OpenFolder(i));
 
+        // Folder tiles are drag sources as well as drop targets, so folders can
+        // be reordered by dragging one onto another. The wire payload has to be
+        // an `AppletString` (the one mime type every destination here accepts),
+        // so we send the folder's first app path and let `dragging_folder` —
+        // set by `on_start` before any drop can land — say what is really being
+        // dragged. Folders whose apps have no desktop path can't be dragged;
+        // they stay plain drop targets.
+        let drag_path = folder
+            .apps
+            .first()
+            .and_then(|id| self.all_entries.iter().find(|e| &e.id == id))
+            .and_then(|e| e.path.clone());
+        let dragged = self.dragging_folder;
+
+        let tile: Element<'a, Message> = match drag_path {
+            Some(path) => {
+                let first_icon = icon_at(0);
+                dnd_source(btn)
+                    .drag_icon(move |_| {
+                        let handle = first_icon.clone();
+                        let element: Element<'static, ()> = match handle {
+                            Some(h) => h
+                                .icon()
+                                .width(Length::Fixed(72.0))
+                                .height(Length::Fixed(72.0))
+                                .into(),
+                            None => space::horizontal()
+                                .width(Length::Fixed(72.0))
+                                .height(Length::Fixed(72.0))
+                                .into(),
+                        };
+                        (element, tree::State::None, cosmic::iced::Vector::ZERO)
+                    })
+                    .drag_content(move || AppletString(path.clone()))
+                    .on_start(Some(Message::StartFolderDrag(i)))
+                    .on_finish(Some(Message::EndFolderDrag))
+                    .on_cancel(Some(Message::EndFolderDrag))
+                    .into()
+            }
+            None => btn.into(),
+        };
+
         dnd_destination_for_data::<AppletString, Message>(
-            btn,
-            move |data: Option<AppletString>, _| {
-                let id = data
-                    .and_then(|data| load_desktop_file(&[], data.0))
-                    .map(|entry| entry.id)
-                    .unwrap_or_default();
-                Message::AddToFolder(i, id)
+            tile,
+            move |data: Option<AppletString>, _| match dragged {
+                // Folder dropped on a folder: reorder rather than merge.
+                Some(from) if from != i => Message::ReorderFolder { from, to: i },
+                Some(_) => Message::IgnoredDrop,
+                None => {
+                    let id = data
+                        .and_then(|data| load_desktop_file(&[], data.0))
+                        .map(|entry| entry.id)
+                        .unwrap_or_default();
+                    Message::AddToFolder(i, id)
+                }
             },
         )
         .drag_id(FOLDER_TILE_DRAG_ID_BASE + i as u64)
@@ -971,6 +1053,7 @@ impl CosmicAppLibrary {
         self.power_menu_open = false;
         self.group_to_delete = None;
         self.fav_drop_hint = None;
+        self.dragging_folder = None;
         self.scroll_offset = 0.0;
         self.settings_view = false;
         self.surface_state = SurfaceState::Hidden;
@@ -1425,6 +1508,27 @@ impl cosmic::Application for CosmicAppLibrary {
             Message::ClosePowerMenu => {
                 self.power_menu_open = false;
             }
+            Message::StartFolderDrag(i) => {
+                self.dragging_folder = Some(i);
+            }
+            Message::EndFolderDrag => {
+                self.dragging_folder = None;
+            }
+            Message::IgnoredDrop => {
+                self.dragging_folder = None;
+                self.fav_drop_hint = None;
+            }
+            Message::ReorderFolder { from, to } => {
+                self.dragging_folder = None;
+                self.fav_drop_hint = None;
+                self.config.reorder_folder(from, to);
+                if let Some(helper) = self.helper.as_ref()
+                    && let Err(err) = self.config.write_entry(helper)
+                {
+                    error!("{:?}", err);
+                }
+                return Task::batch(vec![end_dnd(), self.filter_apps()]);
+            }
             Message::ToggleFavorite(i) => {
                 self.menu = None;
                 let mut tasks = vec![commands::popup::destroy_popup(*MENU_ID)];
@@ -1724,6 +1828,18 @@ impl cosmic::Application for CosmicAppLibrary {
                     error!("{:?}", err);
                 }
                 return set_padding::<()>(SurfaceId::RESERVED, self.layer_padding()).discard();
+            }
+            Message::SetDefaultPage(idx) => {
+                self.config.default_page = match idx {
+                    1 => DefaultPage::Home,
+                    2 => DefaultPage::Favorites,
+                    _ => DefaultPage::Auto,
+                };
+                if let Some(helper) = self.helper.as_ref()
+                    && let Err(err) = self.config.write_entry(helper)
+                {
+                    error!("{:?}", err);
+                }
             }
             Message::SetGridColumns(v) => {
                 self.config.grid_columns = v.clamp(4, 12);
@@ -2166,7 +2282,11 @@ impl cosmic::Application for CosmicAppLibrary {
 
             let settings_button = tooltip(
                 button::custom(
-                    icon::icon(from_name("preferences-system-symbolic").into())
+                    // The COSMIC Settings app icon (a toggle in a circle) — the
+                    // symbolic `preferences-system` glyph is byte-identical to
+                    // the `emblem-system` gear used by Library Settings next to
+                    // it, which made the two buttons indistinguishable.
+                    icon::icon(from_name("com.system76.CosmicSettings").into())
                         .width(Length::Fixed(32.0))
                         .height(Length::Fixed(32.0)),
                 )
@@ -2209,10 +2329,18 @@ impl cosmic::Application for CosmicAppLibrary {
                 .padding(1)
                 .class(theme::Container::Dropdown);
 
+                // Non-modal on purpose: a modal popover captures every mouse
+                // event (libcosmic `popover::update`), which both swallows the
+                // click-outside and stops `on_close` from ever firing, so the
+                // menu could only be dismissed via the power button itself.
+                // Non-modal publishes `on_close` on any press outside the
+                // button's bounds; app tiles are made unclickable below while
+                // the menu is open so a dismissing click can't also launch an
+                // app through the popup.
                 popover(power_button)
                     .popup(power_menu)
                     .position(popover::Position::Bottom)
-                    .modal(true)
+                    .modal(false)
                     .on_close(Message::ClosePowerMenu)
                     .into()
             } else {
@@ -2325,27 +2453,30 @@ impl cosmic::Application for CosmicAppLibrary {
         // (favorites view only, no active search): dropping an app here moves or
         // inserts it at the end of `config.favorites`. Sized like a tile so it
         // slots into the grid; the row-filler below absorbs any leftover width.
-        let append_zone = (favorites_view
-            && self.search_value.is_empty()
-            && !self.entry_path_input.is_empty())
-        .then(|| {
-            let fav_len = self.config.favorites.len();
-            Element::from(
-                dnd_destination_for_data::<AppletString, Message>(
-                    iced::widget::space::horizontal()
-                        .width(Length::FillPortion(1))
-                        .height(Length::Fixed(120.0 + 2.0 * space_s as f32)),
-                    move |data: Option<AppletString>, _| {
-                        let id = data
-                            .and_then(|data| load_desktop_file(&[], data.0))
-                            .map(|entry| entry.id)
-                            .unwrap_or_default();
-                        Message::ReorderFavorite(id, fav_len)
-                    },
-                )
-                .drag_id(FAVORITE_TILE_DRAG_ID_BASE + 999_999),
-            )
-        });
+        let append_zone =
+            (favorites_view && self.search_value.is_empty() && !self.entry_path_input.is_empty())
+                .then(|| {
+                    let fav_len = self.config.favorites.len();
+                    let dragging_folder = self.dragging_folder;
+                    Element::from(
+                        dnd_destination_for_data::<AppletString, Message>(
+                            iced::widget::space::horizontal()
+                                .width(Length::FillPortion(1))
+                                .height(Length::Fixed(120.0 + 2.0 * space_s as f32)),
+                            move |data: Option<AppletString>, _| {
+                                if dragging_folder.is_some() {
+                                    return Message::IgnoredDrop;
+                                }
+                                let id = data
+                                    .and_then(|data| load_desktop_file(&[], data.0))
+                                    .map(|entry| entry.id)
+                                    .unwrap_or_default();
+                                Message::ReorderFavorite(id, fav_len)
+                            },
+                        )
+                        .drag_id(FAVORITE_TILE_DRAG_ID_BASE + 999_999),
+                    )
+                });
 
         // Folder tiles prepend the grid of their host view (Home or
         // Favorites), search empty only, and never inside the folder view
@@ -2398,7 +2529,12 @@ impl cosmic::Application for CosmicAppLibrary {
                     icon_handle.clone(),
                     &entry.path,
                     move |rect| Message::OpenContextMenu(rect, i),
-                    if self.menu.is_none() {
+                    if self.power_menu_open {
+                        // The power popover is non-modal, so a click meant to
+                        // dismiss it would otherwise fall through and launch
+                        // whatever tile is underneath.
+                        None
+                    } else if self.menu.is_none() {
                         Some(Message::ActivateApp(i, gpu_idx))
                     } else if selected {
                         Some(Message::CloseContextMenu)
@@ -2430,9 +2566,7 @@ impl cosmic::Application for CosmicAppLibrary {
                                 .class(theme::Container::Custom(Box::new(|theme| {
                                     let t = theme.cosmic();
                                     container::Style {
-                                        background: Some(
-                                            Color::from(t.accent_color()).into(),
-                                        ),
+                                        background: Some(Color::from(t.accent_color()).into()),
                                         border: Border {
                                             radius: 2.0.into(),
                                             ..Default::default()
@@ -2449,31 +2583,41 @@ impl cosmic::Application for CosmicAppLibrary {
                             .center_y(Length::Fixed(cell_height))
                             .into()
                     };
-                    let reorder_zone = |element: Element<'a, Message>,
-                                        insert_at: usize,
-                                        zone: FavDropZone| {
-                        dnd_destination_for_data::<AppletString, Message>(
-                            element,
-                            move |data: Option<AppletString>, _| {
-                                let id = data
-                                    .and_then(|data| load_desktop_file(&[], data.0))
-                                    .map(|entry| entry.id)
-                                    .unwrap_or_default();
-                                Message::ReorderFavorite(id, insert_at)
-                            },
-                        )
-                        .drag_id(
-                            FAV_STRIP_DRAG_ID_BASE
-                                + 2 * i as u64
-                                + u64::from(zone == FavDropZone::After),
-                        )
-                        .on_enter(move |_, _, _| Message::FavDragEnter(i, zone))
-                        .on_leave(move || Message::FavDragLeave(i, zone))
-                    };
+                    let dragging_folder = self.dragging_folder;
+                    let reorder_zone =
+                        |element: Element<'a, Message>, insert_at: usize, zone: FavDropZone| {
+                            dnd_destination_for_data::<AppletString, Message>(
+                                element,
+                                move |data: Option<AppletString>, _| {
+                                    // A folder can only be reordered against other
+                                    // folder tiles, not slotted into `favorites`.
+                                    if dragging_folder.is_some() {
+                                        return Message::IgnoredDrop;
+                                    }
+                                    let id = data
+                                        .and_then(|data| load_desktop_file(&[], data.0))
+                                        .map(|entry| entry.id)
+                                        .unwrap_or_default();
+                                    Message::ReorderFavorite(id, insert_at)
+                                },
+                            )
+                            .drag_id(
+                                FAV_STRIP_DRAG_ID_BASE
+                                    + 2 * i as u64
+                                    + u64::from(zone == FavDropZone::After),
+                            )
+                            .on_enter(move |_, _, _| Message::FavDragEnter(i, zone))
+                            .on_leave(move || Message::FavDragLeave(i, zone))
+                        };
                     let target_id = entry.id.clone();
                     let combine = dnd_destination_for_data::<AppletString, Message>(
                         b,
                         move |data: Option<AppletString>, _| {
+                            // Dropping a folder onto an app tile has no
+                            // meaning — folders don't nest.
+                            if dragging_folder.is_some() {
+                                return Message::IgnoredDrop;
+                            }
                             let dropped_id = data
                                 .and_then(|data| load_desktop_file(&[], data.0))
                                 .map(|entry| entry.id)
@@ -2500,9 +2644,15 @@ impl cosmic::Application for CosmicAppLibrary {
                     // target: dropping another app here bundles both into a
                     // new folder `[this tile's app, dropped app]`.
                     let target_id = entry.id.clone();
+                    let dragging_folder = self.dragging_folder;
                     dnd_destination_for_data::<AppletString, Message>(
                         b,
                         move |data: Option<AppletString>, _| {
+                            // Dropping a folder onto an app tile has no
+                            // meaning — folders don't nest.
+                            if dragging_folder.is_some() {
+                                return Message::IgnoredDrop;
+                            }
                             let dropped_id = data
                                 .and_then(|data| load_desktop_file(&[], data.0))
                                 .map(|entry| entry.id)
@@ -2708,10 +2858,22 @@ impl cosmic::Application for CosmicAppLibrary {
             };
             let position_row = row![
                 text::body(fl!("position")).width(Length::Fill),
+                cosmic::widget::dropdown(&POSITION_LABELS[..], Some(pos_idx), Message::SetPosition),
+            ]
+            .align_y(Alignment::Center)
+            .height(Length::Fixed(48.0));
+
+            let page_idx = match self.config.default_page {
+                DefaultPage::Auto => 0,
+                DefaultPage::Home => 1,
+                DefaultPage::Favorites => 2,
+            };
+            let default_page_row = row![
+                text::body(fl!("default-page")).width(Length::Fill),
                 cosmic::widget::dropdown(
-                    &POSITION_LABELS[..],
-                    Some(pos_idx),
-                    Message::SetPosition
+                    &DEFAULT_PAGE_LABELS[..],
+                    Some(page_idx),
+                    Message::SetDefaultPage
                 ),
             ]
             .align_y(Alignment::Center)
@@ -2786,6 +2948,7 @@ impl cosmic::Application for CosmicAppLibrary {
 
             let settings_body = column![
                 position_row,
+                default_page_row,
                 columns_row,
                 rows_row,
                 show_settings_row,
@@ -2843,9 +3006,10 @@ impl cosmic::Application for CosmicAppLibrary {
             })))
             .center_x(Length::Fill)
             .width(Length::Fixed(window_width));
-        let window = mouse_area(window)
-            .on_press(Message::CloseContextMenu)
-            .on_release(Message::ClosePowerMenu);
+        // Closing the power menu is the popover's own `on_close`; an ancestor
+        // mouse_area can't help here because the popover consumes the events
+        // before they bubble this far.
+        let window = mouse_area(window).on_press(Message::CloseContextMenu);
         let positioned = match self.effective_position() {
             LibraryPosition::Bottom => column!(
                 space::vertical().height(Length::Fill),

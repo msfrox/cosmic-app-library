@@ -150,9 +150,7 @@ impl AppGroup {
                     // Groups with `keep_in_home == true` are favorites-style:
                     // their apps stay visible in Home instead of being
                     // exclusively moved into the group.
-                    !exceptions
-                        .iter()
-                        .any(|x| !x.keep_in_home && x.matches(de))
+                    !exceptions.iter().any(|x| !x.keep_in_home && x.matches(de))
                 } else {
                     de.name.to_lowercase().contains(&input_value.to_lowercase())
                         || de
@@ -224,6 +222,23 @@ impl Default for LibraryPosition {
     }
 }
 
+/// Which view the library opens on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DefaultPage {
+    /// Favorites when any exist, otherwise Home (the historical behaviour).
+    Auto,
+    /// Always open on Home.
+    Home,
+    /// Always open on Favorites, even when it is empty.
+    Favorites,
+}
+
+impl Default for DefaultPage {
+    fn default() -> Self {
+        Self::Auto
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, CosmicConfigEntry)]
 pub struct AppLibraryConfig {
     pub(crate) groups: Vec<AppGroup>,
@@ -248,6 +263,9 @@ pub struct AppLibraryConfig {
     /// Show the power-menu button in the header.
     #[serde(default = "default_true")]
     pub show_power_button: bool,
+    /// Which view the library opens on.
+    #[serde(default)]
+    pub default_page: DefaultPage,
 }
 
 fn default_true() -> bool {
@@ -465,6 +483,20 @@ impl AppLibraryConfig {
         true
     }
 
+    /// Move folder `from` so it sits at index `to` in `folders`, shifting the
+    /// folders in between. Both indices are into the global `folders` vec (the
+    /// per-view tile order is just this vec filtered by `in_favorites`, so a
+    /// plain move preserves the relative order of the other view's folders).
+    pub fn reorder_folder(&mut self, from: usize, to: usize) {
+        if from >= self.folders.len() || from == to {
+            return;
+        }
+        let folder = self.folders.remove(from);
+        // Removing `from` shifts everything after it left by one.
+        let to = to.min(self.folders.len());
+        self.folders.insert(to, folder);
+    }
+
     /// Rename folder `i`.
     pub fn rename_folder(&mut self, i: usize, name: String) {
         if let Some(folder) = self.folders.get_mut(i) {
@@ -591,6 +623,83 @@ impl Default for AppLibraryConfig {
             folders: Vec::new(),
             show_settings_button: true,
             show_power_button: true,
+            default_page: DefaultPage::default(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn folders(spec: &[(&str, bool)]) -> AppLibraryConfig {
+        AppLibraryConfig {
+            folders: spec
+                .iter()
+                .map(|(name, in_favorites)| AppFolder {
+                    name: name.to_string(),
+                    apps: vec!["a".into(), "b".into()],
+                    in_favorites: *in_favorites,
+                })
+                .collect(),
+            ..AppLibraryConfig::default()
+        }
+    }
+
+    fn names(config: &AppLibraryConfig) -> Vec<&str> {
+        config.folders.iter().map(|f| f.name.as_str()).collect()
+    }
+
+    #[test]
+    fn reorder_folder_moves_left() {
+        let mut c = folders(&[("A", false), ("B", false), ("C", false)]);
+        c.reorder_folder(2, 0);
+        assert_eq!(names(&c), ["C", "A", "B"]);
+    }
+
+    #[test]
+    fn reorder_folder_moves_right() {
+        let mut c = folders(&[("A", false), ("B", false), ("C", false)]);
+        // Dragging A onto C lands it after C: removing A shifts C left to 1,
+        // so inserting at 2 puts A last.
+        c.reorder_folder(0, 2);
+        assert_eq!(names(&c), ["B", "C", "A"]);
+    }
+
+    #[test]
+    fn reorder_folder_ignores_noop_and_out_of_range() {
+        let mut c = folders(&[("A", false), ("B", false)]);
+        c.reorder_folder(1, 1);
+        assert_eq!(names(&c), ["A", "B"]);
+        c.reorder_folder(9, 0);
+        assert_eq!(names(&c), ["A", "B"]);
+    }
+
+    #[test]
+    fn reorder_folder_preserves_the_other_views_order() {
+        // Home tiles are A and C; Favorites tiles are B and D. Reordering the
+        // Home pair must not disturb the Favorites pair's relative order.
+        let mut c = folders(&[("A", false), ("B", true), ("C", false), ("D", true)]);
+        c.reorder_folder(2, 0);
+        assert_eq!(names(&c), ["C", "A", "B", "D"]);
+        let home: Vec<_> = c
+            .folders
+            .iter()
+            .filter(|f| !f.in_favorites)
+            .map(|f| f.name.as_str())
+            .collect();
+        let fav: Vec<_> = c
+            .folders
+            .iter()
+            .filter(|f| f.in_favorites)
+            .map(|f| f.name.as_str())
+            .collect();
+        assert_eq!(home, ["C", "A"]);
+        assert_eq!(fav, ["B", "D"]);
+    }
+
+    #[test]
+    fn default_page_defaults_to_auto() {
+        assert_eq!(AppLibraryConfig::default().default_page, DefaultPage::Auto);
     }
 }
