@@ -11,10 +11,11 @@ Resume line: *"Continue cosmic-app-library. Read PLAN.md and HANDOFF.md in
   modal popover now swallows every mouse event, so the ancestor mouse_area
   `on_release` never fired — switched to `modal(false)` + `on_close`, and app
   tiles go unclickable while the menu is open so the dismissing click can't
-  launch anything); COSMIC Settings launcher icon changed to
-  `com.system76.CosmicSettings` (it was the identical gear to Library
-  Settings); folder tiles drag-reorder; `default_page` setting (Auto/Home/
-  Favorites).
+  launch anything); COSMIC Settings launcher now uses a bundled
+  `cosmic-settings-toggle-symbolic` (ring + toggle) instead of the gear that
+  was identical to Library Settings'; folder tiles drag-reorder; apps inside a
+  folder drag-reorder via the same strips Favorites uses; `default_page`
+  setting (Auto/Home/Favorites).
 - Phase 14 (dd36357): settings-page togglers hide the header Settings/Power
   buttons (`show_settings_button`/`show_power_button`, serde default true;
   gear icon always visible; hiding power closes an open power menu).
@@ -50,6 +51,11 @@ Resume line: *"Continue cosmic-app-library. Read PLAN.md and HANDOFF.md in
      position, order survives a reopen. Dragging a folder onto an app tile or
      a favorites gap does nothing (no folder created, no favorite inserted).
      Dragging an *app* onto a folder still adds it to the folder.
+   - (e) In-folder reorder: open a folder, drag an app onto the gap beside
+     another → accent bar shows, release reorders, order survives reopen.
+     Dropping on a tile's *centre* inside a folder should do nothing (no
+     nested folder). Favorites' drop-on-tile-to-combine must still work — that
+     branch is now shared between the two views, so re-check it.
    - (d) Settings → "Open on": Home / Favorites / Auto each pick the right
      starting view on next open.
    **Phases 11–14 (still unverified):** favorites drag strips + drop-to-combine;

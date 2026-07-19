@@ -272,6 +272,27 @@ fn default_true() -> bool {
     true
 }
 
+/// Move `id` within `list` so it ends up at `insert_at`, using insert-before
+/// semantics (`insert_at == list.len()` appends). If `id` isn't already in
+/// `list` it is inserted at that position. Shared by the Favorites reorder and
+/// the in-folder reorder, which differ only in which vec they act on.
+pub fn move_within(list: &mut Vec<String>, id: &str, insert_at: usize) {
+    let insert_at = if let Some(old) = list.iter().position(|x| x == id) {
+        list.remove(old);
+        // Removing the old entry shifts everything after it left by one, so an
+        // insertion index that was past it must shift too.
+        if old < insert_at {
+            insert_at - 1
+        } else {
+            insert_at
+        }
+    } else {
+        insert_at
+    }
+    .min(list.len());
+    list.insert(insert_at, id.to_string());
+}
+
 fn default_grid_columns() -> u32 {
     7
 }
@@ -481,6 +502,20 @@ impl AppLibraryConfig {
             }
         }
         true
+    }
+
+    /// Move `id` within folder `i`'s app list so it ends up at `insert_at`
+    /// (insert-before semantics; `insert_at == len` appends). No-op if the
+    /// folder doesn't hold `id` — an app is only reorderable inside the folder
+    /// it already lives in.
+    pub fn reorder_folder_app(&mut self, i: usize, id: &str, insert_at: usize) {
+        let Some(folder) = self.folders.get_mut(i) else {
+            return;
+        };
+        if !folder.apps.iter().any(|a| a == id) {
+            return;
+        }
+        move_within(&mut folder.apps, id, insert_at);
     }
 
     /// Move folder `from` so it sits at index `to` in `folders`, shifting the
@@ -696,6 +731,74 @@ mod tests {
             .collect();
         assert_eq!(home, ["C", "A"]);
         assert_eq!(fav, ["B", "D"]);
+    }
+
+    fn list(items: &[&str]) -> Vec<String> {
+        items.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn move_within_moves_backwards() {
+        let mut l = list(&["a", "b", "c", "d"]);
+        move_within(&mut l, "d", 1);
+        assert_eq!(l, list(&["a", "d", "b", "c"]));
+    }
+
+    #[test]
+    fn move_within_moves_forwards() {
+        // Insert-before semantics against the *original* indices: asking for
+        // index 3 while "a" sits at 0 lands it after "c", not after "d".
+        let mut l = list(&["a", "b", "c", "d"]);
+        move_within(&mut l, "a", 3);
+        assert_eq!(l, list(&["b", "c", "a", "d"]));
+    }
+
+    #[test]
+    fn move_within_appends_at_len() {
+        let mut l = list(&["a", "b", "c"]);
+        move_within(&mut l, "a", 3);
+        assert_eq!(l, list(&["b", "c", "a"]));
+    }
+
+    #[test]
+    fn move_within_is_a_noop_for_the_same_slot() {
+        let mut l = list(&["a", "b", "c"]);
+        move_within(&mut l, "b", 1);
+        assert_eq!(l, list(&["a", "b", "c"]));
+    }
+
+    #[test]
+    fn move_within_inserts_an_absent_id() {
+        let mut l = list(&["a", "b"]);
+        move_within(&mut l, "z", 1);
+        assert_eq!(l, list(&["a", "z", "b"]));
+    }
+
+    #[test]
+    fn move_within_clamps_an_out_of_range_index() {
+        let mut l = list(&["a", "b"]);
+        move_within(&mut l, "a", 99);
+        assert_eq!(l, list(&["b", "a"]));
+    }
+
+    #[test]
+    fn reorder_folder_app_reorders_within_the_folder() {
+        let mut c = folders(&[("A", false)]);
+        c.folders[0].apps = list(&["x", "y", "z"]);
+        c.reorder_folder_app(0, "z", 0);
+        assert_eq!(c.folders[0].apps, list(&["z", "x", "y"]));
+    }
+
+    #[test]
+    fn reorder_folder_app_ignores_apps_not_in_the_folder() {
+        // Dropping a stray id into a folder's strips must not smuggle a new
+        // app in — only `add_to_folder` may do that.
+        let mut c = folders(&[("A", false)]);
+        c.folders[0].apps = list(&["x", "y"]);
+        c.reorder_folder_app(0, "outsider", 0);
+        assert_eq!(c.folders[0].apps, list(&["x", "y"]));
+        c.reorder_folder_app(9, "x", 0);
+        assert_eq!(c.folders[0].apps, list(&["x", "y"]));
     }
 
     #[test]

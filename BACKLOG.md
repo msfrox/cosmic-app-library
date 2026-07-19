@@ -4,9 +4,8 @@
 - Frosted-blur tight region (upstream #387): use core.main_window_id() as the
   BlurSurface id + real output size — see PLAN.md Phase 9 findings.
 - Sync favorites with the dock's pinned apps (cosmic-app-list-config).
-- Reorder apps within Home (Home is alphabetical; only Favorites and folder
-  tiles have a user-defined order).
-- Reorder apps inside a folder view.
+- Reorder apps within Home (Home is alphabetical; Favorites, folder tiles and
+  in-folder apps all have a user-defined order).
 - Drag-to-resize the library window by its edges (rows/columns settings chosen
   instead — revisit only if owner wants direct manipulation).
 - Upstream cherry-picks still open: #378 hide/unhide (conflicts), #153
@@ -19,4 +18,5 @@
   ~~multiple favorite-style groups~~ (Phases 8+11 folders) · ~~drop-to-combine
   in favorites~~ (Phase 12) · ~~resize + settings page~~ (Phase 13) ·
   ~~header button toggles~~ (Phase 14) · ~~folder tile reorder by drag~~,
-  ~~default opening page~~, ~~distinct settings icon~~ (Phase 15)
+  ~~in-folder app reorder~~, ~~default opening page~~, ~~distinct settings
+  icon~~ (Phase 15)

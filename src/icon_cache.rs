@@ -36,6 +36,12 @@ impl IconCache {
         bundle!("app-source-snap", 16);
         bundle!("app-source-nix", 16);
         bundle!("app-source-system-symbolic", 16);
+        // Header button for the cosmic-settings launcher: a toggle in a ring,
+        // echoing COSMIC Settings' own app icon. Bundled rather than looked up
+        // by name because no icon theme ships a symbolic toggle glyph, and the
+        // stock `preferences-system-symbolic` is the same gear as the Library
+        // Settings button next to it.
+        bundle!("cosmic-settings-toggle-symbolic", 32);
 
         Self { cache }
     }

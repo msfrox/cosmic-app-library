@@ -721,6 +721,9 @@ enum Message {
     /// Move (or insert) the favorite app with this id so it sits at `index`
     /// in `config.favorites` (insert-before semantics; `index == len` appends).
     ReorderFavorite(String, usize),
+    /// Move the app with this id to `index` within the currently open folder's
+    /// app list (same insert-before semantics as `ReorderFavorite`).
+    ReorderFolderApp(String, usize),
     ScrollYOffset(f32),
     GpuUpdate(Option<Vec<Gpu>>),
     PinToAppTray(usize),
@@ -1695,17 +1698,24 @@ impl cosmic::Application for CosmicAppLibrary {
                     // Drag payload couldn't be resolved to a desktop entry; ignore.
                     return Task::none();
                 }
-                let favorites = &mut self.config.favorites;
-                let index = if let Some(old) = favorites.iter().position(|f| f == &id) {
-                    favorites.remove(old);
-                    // Removing the old entry shifts everything after it left by
-                    // one, so an insertion index that was past it must shift too.
-                    if old < index { index - 1 } else { index }
-                } else {
-                    index
+                crate::app_group::move_within(&mut self.config.favorites, &id, index);
+                if let Some(helper) = self.helper.as_ref()
+                    && let Err(err) = self.config.write_entry(helper)
+                {
+                    error!("{:?}", err);
                 }
-                .min(favorites.len());
-                favorites.insert(index, id);
+                return self.filter_apps();
+            }
+            Message::ReorderFolderApp(id, index) => {
+                self.fav_drop_hint = None;
+                let Some(folder_idx) = self.open_folder else {
+                    return Task::none();
+                };
+                if id.is_empty() {
+                    // Drag payload couldn't be resolved to a desktop entry; ignore.
+                    return Task::none();
+                }
+                self.config.reorder_folder_app(folder_idx, &id, index);
                 if let Some(helper) = self.helper.as_ref()
                     && let Err(err) = self.config.write_entry(helper)
                 {
@@ -2282,13 +2292,16 @@ impl cosmic::Application for CosmicAppLibrary {
 
             let settings_button = tooltip(
                 button::custom(
-                    // The COSMIC Settings app icon (a toggle in a circle) — the
-                    // symbolic `preferences-system` glyph is byte-identical to
+                    // A toggle in a ring (bundled, symbolic) — the stock
+                    // `preferences-system-symbolic` glyph is byte-identical to
                     // the `emblem-system` gear used by Library Settings next to
                     // it, which made the two buttons indistinguishable.
-                    icon::icon(from_name("com.system76.CosmicSettings").into())
-                        .width(Length::Fixed(32.0))
-                        .height(Length::Fixed(32.0)),
+                    icon::icon(crate::icon_cache::icon_cache_handle(
+                        "cosmic-settings-toggle-symbolic",
+                        32,
+                    ))
+                    .width(Length::Fixed(32.0))
+                    .height(Length::Fixed(32.0)),
                 )
                 .padding(space_xs)
                 .class(Button::Icon)
@@ -2549,12 +2562,15 @@ impl cosmic::Application for CosmicAppLibrary {
                     self.menu.is_none().then_some(Message::CancelDrag),
                 );
 
-                if favorites_view {
+                if favorites_view || folder_view {
                     // Positional drops: the narrow strips flanking the tile
-                    // insert-reorder the dragged app before/after it, while
-                    // the tile's own area combines both apps into a favorites
-                    // folder. Three SIBLING destinations per cell — never
-                    // nested, so hit-testing stays unambiguous.
+                    // insert-reorder the dragged app before/after it. In
+                    // Favorites the tile's own area additionally combines both
+                    // apps into a folder; inside a folder view there's nothing
+                    // to combine into (folders don't nest), so the tile is left
+                    // plain and only the strips are destinations. Three (or
+                    // two) SIBLING destinations per cell — never nested, so
+                    // hit-testing stays unambiguous.
                     let cell_height = 120.0 + 2.0 * space_s as f32;
                     let strip = |zone: FavDropZone| -> Element<'a, Message> {
                         let active = self.fav_drop_hint == Some((i, zone));
@@ -2589,8 +2605,9 @@ impl cosmic::Application for CosmicAppLibrary {
                             dnd_destination_for_data::<AppletString, Message>(
                                 element,
                                 move |data: Option<AppletString>, _| {
-                                    // A folder can only be reordered against other
-                                    // folder tiles, not slotted into `favorites`.
+                                    // A folder can only be reordered against
+                                    // other folder tiles, never slotted into an
+                                    // app list.
                                     if dragging_folder.is_some() {
                                         return Message::IgnoredDrop;
                                     }
@@ -2598,7 +2615,11 @@ impl cosmic::Application for CosmicAppLibrary {
                                         .and_then(|data| load_desktop_file(&[], data.0))
                                         .map(|entry| entry.id)
                                         .unwrap_or_default();
-                                    Message::ReorderFavorite(id, insert_at)
+                                    if folder_view {
+                                        Message::ReorderFolderApp(id, insert_at)
+                                    } else {
+                                        Message::ReorderFavorite(id, insert_at)
+                                    }
                                 },
                             )
                             .drag_id(
@@ -2609,32 +2630,40 @@ impl cosmic::Application for CosmicAppLibrary {
                             .on_enter(move |_, _, _| Message::FavDragEnter(i, zone))
                             .on_leave(move || Message::FavDragLeave(i, zone))
                         };
-                    let target_id = entry.id.clone();
-                    let combine = dnd_destination_for_data::<AppletString, Message>(
-                        b,
-                        move |data: Option<AppletString>, _| {
-                            // Dropping a folder onto an app tile has no
-                            // meaning — folders don't nest.
-                            if dragging_folder.is_some() {
-                                return Message::IgnoredDrop;
-                            }
-                            let dropped_id = data
-                                .and_then(|data| load_desktop_file(&[], data.0))
-                                .map(|entry| entry.id)
-                                .unwrap_or_default();
-                            Message::CreateFolderFromDrop {
-                                target_id: target_id.clone(),
-                                dropped_id,
-                                in_favorites: true,
-                            }
-                        },
-                    )
-                    .drag_id(FAVORITE_TILE_DRAG_ID_BASE + i as u64)
-                    .on_enter(move |_, _, _| Message::FavDragEnter(i, FavDropZone::Onto))
-                    .on_leave(move || Message::FavDragLeave(i, FavDropZone::Onto));
+                    // Inside a folder view the tile stays a plain button:
+                    // there's no "combine" to offer, and making it a
+                    // destination would only steal drops from the strips.
+                    let center: Element<'a, Message> = if folder_view {
+                        b.into()
+                    } else {
+                        let target_id = entry.id.clone();
+                        dnd_destination_for_data::<AppletString, Message>(
+                            b,
+                            move |data: Option<AppletString>, _| {
+                                // Dropping a folder onto an app tile has no
+                                // meaning — folders don't nest.
+                                if dragging_folder.is_some() {
+                                    return Message::IgnoredDrop;
+                                }
+                                let dropped_id = data
+                                    .and_then(|data| load_desktop_file(&[], data.0))
+                                    .map(|entry| entry.id)
+                                    .unwrap_or_default();
+                                Message::CreateFolderFromDrop {
+                                    target_id: target_id.clone(),
+                                    dropped_id,
+                                    in_favorites: true,
+                                }
+                            },
+                        )
+                        .drag_id(FAVORITE_TILE_DRAG_ID_BASE + i as u64)
+                        .on_enter(move |_, _, _| Message::FavDragEnter(i, FavDropZone::Onto))
+                        .on_leave(move || Message::FavDragLeave(i, FavDropZone::Onto))
+                        .into()
+                    };
                     row![
                         reorder_zone(strip(FavDropZone::Before), i, FavDropZone::Before),
-                        combine,
+                        center,
                         reorder_zone(strip(FavDropZone::After), i + 1, FavDropZone::After),
                     ]
                     .width(Length::FillPortion(1))

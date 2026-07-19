@@ -241,10 +241,13 @@ visible so the page stays reachable.
   launch the app underneath.
 - **Header icons.** `preferences-system-symbolic` (COSMIC Settings launcher)
   and `emblem-system-symbolic` (Library Settings) are the *same gear glyph* —
-  verified by rendering both. The launcher now uses the `com.system76.
-  CosmicSettings` app icon (toggle-in-a-circle), so the two buttons read
-  differently. It is a colour icon among symbolic ones by design — it's the
-  icon COSMIC Settings itself uses.
+  verified by rendering both. The launcher now uses a purpose-drawn
+  `cosmic-settings-toggle-symbolic`: an outer ring around a filled toggle pill
+  with a hollow knob, echoing COSMIC Settings' own app icon. No icon theme
+  ships a symbolic toggle glyph, so it's bundled via `icon_cache`'s `bundle!`
+  (compile-time `include_bytes!`, like the app-source icons) rather than
+  installed — nothing to add to `data/icons/justfile`, and it can't go missing
+  on a themed system. Being `-symbolic`-suffixed it recolours with the theme.
 - **Folder reorder (was BACKLOG).** Folder tiles become `dnd_source`s as well
   as destinations; dropping folder A on folder B moves A to B's index.
   Everything on the wire is one `AppletString` mime, so the payload can't say
@@ -255,11 +258,24 @@ visible so the page stays reachable.
   moves within the global `folders` vec; since a view's tiles are just that vec
   filtered by `in_favorites`, the other view's relative order is untouched
   (unit-tested).
+- **In-folder app reorder (was BACKLOG).** The folder view now gets the same
+  flanking reorder strips as Favorites — the whole `if favorites_view` tile
+  branch became `if favorites_view || folder_view`, picking `ReorderFolderApp`
+  vs `ReorderFavorite` per view. Inside a folder the tile centre stays a plain
+  button (nothing to combine into, and a destination there would only steal
+  drops from the strips); Favorites keeps its combine-on-tile. The duplicated
+  insert-before index-shift is now one tested `app_group::move_within` helper
+  used by both paths. `reorder_folder_app` refuses ids the folder doesn't
+  already hold, so a stray drop can't smuggle an app in behind
+  `add_to_folder`'s back.
 - **Default opening page.** `DefaultPage { Auto, Home, Favorites }` config enum
   (serde default `Auto` = the old favorites-if-any behaviour), dropdown on the
   settings page above Columns/Rows. i18n: `default-page`, `default-page-auto`.
-- First unit tests in the repo (`src/app_group.rs`): 5 covering
-  `reorder_folder` index-shifting and the `DefaultPage` default.
+- First unit tests in the repo (`src/app_group.rs`): 13 covering
+  `move_within`, `reorder_folder` / `reorder_folder_app` index-shifting and the
+  `DefaultPage` default. `move_within_moves_forwards` pins the exact
+  insert-before semantics the inline favourites code had, so the de-duplication
+  is provably behaviour-preserving.
 - NOT addressed (owner deferred): frosted-blur tight region.
 
 ## Delegation plan (per playbook §5)
