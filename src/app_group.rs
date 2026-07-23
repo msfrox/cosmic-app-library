@@ -489,8 +489,15 @@ impl AppLibraryConfig {
         let Some(folder) = self.folders.get_mut(i) else {
             return false;
         };
+        let in_favorites = folder.in_favorites;
         folder.apps.retain(|a| a != id);
-        if folder.apps.len() >= 2 {
+        // A favorites-style folder represents its apps in place of favorite
+        // tiles; pulling an app out must return it to `favorites` so it
+        // reappears as its own tile instead of vanishing.
+        if in_favorites && !self.favorites.iter().any(|f| f == id) {
+            self.favorites.push(id.to_string());
+        }
+        if self.folders[i].apps.len() >= 2 {
             return false;
         }
         let folder = self.folders.remove(i);
@@ -799,6 +806,39 @@ mod tests {
         assert_eq!(c.folders[0].apps, list(&["x", "y"]));
         c.reorder_folder_app(9, "x", 0);
         assert_eq!(c.folders[0].apps, list(&["x", "y"]));
+    }
+
+    #[test]
+    fn remove_from_favorites_folder_returns_app_to_favorites() {
+        // A favorites folder with three apps: pulling one out keeps the folder
+        // (two apps remain) and the removed app rejoins `favorites` as a tile.
+        let mut c = folders(&[("A", true)]);
+        c.folders[0].apps = list(&["a", "b", "c"]);
+        let dissolved = c.remove_from_folder(0, "b");
+        assert!(!dissolved);
+        assert_eq!(c.folders[0].apps, list(&["a", "c"]));
+        assert_eq!(c.favorites, list(&["b"]));
+    }
+
+    #[test]
+    fn remove_from_home_folder_does_not_touch_favorites() {
+        // Home folders don't back favorite tiles, so removal must not leak the
+        // app into `favorites`.
+        let mut c = folders(&[("A", false)]);
+        c.folders[0].apps = list(&["a", "b", "c"]);
+        c.remove_from_folder(0, "b");
+        assert!(c.favorites.is_empty());
+    }
+
+    #[test]
+    fn dissolving_favorites_folder_returns_both_apps() {
+        // Removing an app from a two-app favorites folder dissolves it; both
+        // the removed app and the survivor land back in `favorites`.
+        let mut c = folders(&[("A", true)]);
+        let dissolved = c.remove_from_folder(0, "a");
+        assert!(dissolved);
+        assert!(c.folders.is_empty());
+        assert_eq!(c.favorites, list(&["a", "b"]));
     }
 
     #[test]
