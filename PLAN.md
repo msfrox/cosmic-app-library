@@ -278,6 +278,65 @@ visible so the page stays reachable.
   is provably behaviour-preserving.
 - NOT addressed (owner deferred): frosted-blur tight region.
 
+### Phase 16 — Sapphire toolchain bring-up + Home reorder (was BACKLOG) ✅ (code) / ⬜ (verify)
+- **Toolchain, from a container with no cargo and no Wayland dev headers**
+  (Debian 12 bookworm, `claude-code` container on Sapphire). Full recipe now
+  lives in `docs/away/sapphire-toolchain.md` so the next away session doesn't
+  re-pay this; short version:
+  - `rustup` isn't preinstalled — install via `sh rustup-init.sh -y
+    --default-toolchain none`, then `rust-toolchain.toml` (`1.93.0`)
+    auto-installs the pinned toolchain on first `cargo` invocation in-tree.
+  - `just` isn't apt-packageable on bookworm (no `just` binary in the repos) —
+    `cargo install just`.
+  - apt aborts the **whole** transaction if any one package name in the list
+    is wrong — install `just` separately rather than losing the rest of the
+    list to one bad name.
+  - System packages (see the doc for the full list and why each is there):
+    `pkg-config libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev
+    wayland-protocols libinput-dev libudev-dev libgtk-4-dev libgtk-3-dev
+    libglib2.0-dev desktop-file-utils libegl1-mesa-dev libgles2-mesa-dev
+    libssl-dev libfontconfig1-dev libfreetype6-dev libx11-dev libxcursor-dev
+    libxrandr-dev libxi-dev libgl1-mesa-dev build-essential cmake clang
+    libclang-dev`.
+  - Cold `cargo build` (debug) compiles hundreds of crates including libcosmic
+    from git; budget well over 10 minutes on this box's CPU — it does not fit
+    a single foreground command and needs to run backgrounded across turns.
+- **Home reorder.** `BACKLOG.md`: Home was alphabetical-only while Favorites,
+  folder tiles and in-folder apps all have a drag order. Extends the existing
+  `move_within` pattern rather than inventing a new one:
+  - `AppLibraryConfig::home_order: Vec<String>` (serde default empty) —
+    Favorites-shaped, but *not* authoritative the way `favorites` is: Home
+    holds every installed app, most of which have never been dragged, so an
+    empty/partial `home_order` can't just replace the alphabetical list.
+  - `app_group::apply_home_order(order, apps)`: apps already sorted
+    alphabetically by `filter_apps`; any id present in `order` is pulled to
+    the front in `order`'s sequence, everything else (never dragged, or newly
+    installed) is appended afterwards keeping its alphabetical order — same
+    "new items land at the end" rule Favorites already uses when `add_entry`
+    pushes onto `favorites`. 4 unit tests.
+  - `Message::ReorderHome(id, index)`, handled exactly like `ReorderFavorite`
+    but against `config.home_order` (via the same tested `move_within`).
+  - View: the `if favorites_view || folder_view` tile branch (flanking
+    reorder strips + tile-centre combine-into-folder) becomes
+    `if favorites_view || folder_view || home_view`. Home's existing
+    combine-into-folder tile (`CreateFolderFromDrop { in_favorites: false,
+    .. }`, previously its own unstruck `else if` branch with no strips) is
+    folded into the same three-sibling-destination shape Favorites/folders
+    use, picking `ReorderHome` vs `ReorderFolderApp` vs `ReorderFavorite` and
+    `in_favorites: !home_view` per view. This also gives Home tiles the
+    accent "release here combines" hover hint (`combine_hint`,
+    `FavDragEnter`/`FavDragLeave`) that Favorites already had but Home never
+    did — a small behavioural improvement, not just parity.
+  - Did **not** add a Favorites-style trailing "append to end" drop zone for
+    Home — Home's grid is usually much longer than Favorites', so the last
+    row already has empty filler space to drop into; can be added later if
+    it turns out to matter.
+- **Verification ceiling, same as every other phase here:** no display, no
+  Wayland, so the drag interactions above are compile + unit-test verified
+  only. **Unverified, needs RUBY2**: whether the strips render where expected,
+  whether the combine hint reads right against the Home grid, whether
+  reordering "feels" like Favorites' in practice.
+
 ## Delegation plan (per playbook §5)
 - **Main thread:** Phase 1 positioning math, Phase 2 power/DBus integration,
   anything touching layer-shell/iced surfaces. Judgment-heavy on unfamiliar libcosmic.
