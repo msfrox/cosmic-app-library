@@ -266,6 +266,12 @@ pub struct AppLibraryConfig {
     /// Which view the library opens on.
     #[serde(default)]
     pub default_page: DefaultPage,
+    /// User-defined order for Home tiles, mirroring `favorites`. Home is
+    /// alphabetical by default; an app dragged in Home records its id here
+    /// via `move_within`. Apps not yet present keep their alphabetical spot,
+    /// appended after the ordered ones — see `apply_home_order`.
+    #[serde(default)]
+    pub home_order: Vec<String>,
 }
 
 fn default_true() -> bool {
@@ -291,6 +297,26 @@ pub fn move_within(list: &mut Vec<String>, id: &str, insert_at: usize) {
     }
     .min(list.len());
     list.insert(insert_at, id.to_string());
+}
+
+/// Reorder `apps` (assumed already alphabetized) using `order`: entries whose
+/// id appears in `order` come first, in that sequence; everything else (a
+/// newly installed app, or one never dragged) is appended afterwards, keeping
+/// its incoming (alphabetical) order — the same "new items land at the end"
+/// rule Favorites uses when `add_entry` pushes onto `favorites`.
+pub fn apply_home_order(
+    order: &[String],
+    apps: Vec<Arc<DesktopEntryData>>,
+) -> Vec<Arc<DesktopEntryData>> {
+    let mut remaining = apps;
+    let mut ordered = Vec::with_capacity(remaining.len());
+    for id in order {
+        if let Some(pos) = remaining.iter().position(|a| &a.id == id) {
+            ordered.push(remaining.remove(pos));
+        }
+    }
+    ordered.extend(remaining);
+    ordered
 }
 
 fn default_grid_columns() -> u32 {
@@ -666,6 +692,7 @@ impl Default for AppLibraryConfig {
             show_settings_button: true,
             show_power_button: true,
             default_page: DefaultPage::default(),
+            home_order: Vec::new(),
         }
     }
 }
@@ -844,5 +871,52 @@ mod tests {
     #[test]
     fn default_page_defaults_to_auto() {
         assert_eq!(AppLibraryConfig::default().default_page, DefaultPage::Auto);
+    }
+
+    fn entries(ids: &[&str]) -> Vec<Arc<DesktopEntryData>> {
+        ids.iter()
+            .map(|id| {
+                Arc::new(DesktopEntryData {
+                    id: id.to_string(),
+                    name: id.to_string(),
+                    ..Default::default()
+                })
+            })
+            .collect()
+    }
+
+    fn ids(apps: &[Arc<DesktopEntryData>]) -> Vec<&str> {
+        apps.iter().map(|a| a.id.as_str()).collect()
+    }
+
+    #[test]
+    fn apply_home_order_reorders_known_ids() {
+        let apps = entries(&["a", "b", "c"]);
+        let order = list(&["c", "a", "b"]);
+        assert_eq!(ids(&apply_home_order(&order, apps)), ["c", "a", "b"]);
+    }
+
+    #[test]
+    fn apply_home_order_appends_unordered_apps_after_the_ordered_ones() {
+        // "d" was never dragged, so it isn't in `order` yet; it lands after
+        // the ordered apps, keeping its alphabetical position among the
+        // leftovers.
+        let apps = entries(&["a", "b", "c", "d"]);
+        let order = list(&["c", "a"]);
+        assert_eq!(ids(&apply_home_order(&order, apps)), ["c", "a", "b", "d"]);
+    }
+
+    #[test]
+    fn apply_home_order_is_a_noop_for_an_empty_order() {
+        let apps = entries(&["a", "b"]);
+        assert_eq!(ids(&apply_home_order(&[], apps)), ["a", "b"]);
+    }
+
+    #[test]
+    fn apply_home_order_ignores_stale_ids_no_longer_installed() {
+        // `order` can outlive an uninstalled app; it's simply skipped.
+        let apps = entries(&["a", "b"]);
+        let order = list(&["gone", "b", "a"]);
+        assert_eq!(ids(&apply_home_order(&order, apps)), ["b", "a"]);
     }
 }
