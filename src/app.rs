@@ -16,7 +16,7 @@ use cosmic::iced::window;
 use cosmic::surface::action::{LiveSettings, app_layer_shell, simple_layer_shell, simple_popup};
 use cosmic::widget::menu::menu_column::MenuColumn;
 use cosmic::widget::space::horizontal;
-use cosmic::widget::{ListColumn, reorderable_flex_row};
+use cosmic::widget::reorderable_flex_row;
 use cosmic::{
     Element,
     app::{Core, CosmicFlags, Settings, Task},
@@ -78,7 +78,7 @@ use cosmic::{
     keyboard_nav,
     theme::{self, Button, TextInput},
     widget::{
-        self, Column,
+        self,
         autosize::autosize,
         button, divider,
         dnd_destination::dnd_destination_for_data,
@@ -1485,7 +1485,7 @@ impl cosmic::Application for CosmicAppLibrary {
                     self.menu = Some(i);
                     let offset = self.scroll_offset as i32;
                     return cosmic::surface::surface_task(simple_popup(
-                        || LiveSettings::default(),
+                        LiveSettings::default,
                         move || {
                             SctkPopupSettings {
                         parent: SurfaceId::RESERVED,

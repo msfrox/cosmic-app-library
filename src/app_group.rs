@@ -203,10 +203,11 @@ impl AppGroup {
 }
 
 /// Which edge of the screen the app library opens from.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum LibraryPosition {
     /// Follow the panel/dock: bottom if a bottom dock is present and there is no
     /// top panel, otherwise top.
+    #[default]
     Auto,
     /// Always anchor to the top of the screen.
     Top,
@@ -216,27 +217,16 @@ pub enum LibraryPosition {
     Center,
 }
 
-impl Default for LibraryPosition {
-    fn default() -> Self {
-        Self::Auto
-    }
-}
-
 /// Which view the library opens on.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum DefaultPage {
     /// Favorites when any exist, otherwise Home (the historical behaviour).
+    #[default]
     Auto,
     /// Always open on Home.
     Home,
     /// Always open on Favorites, even when it is empty.
     Favorites,
-}
-
-impl Default for DefaultPage {
-    fn default() -> Self {
-        Self::Auto
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, CosmicConfigEntry)]
