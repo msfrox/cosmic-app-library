@@ -15,8 +15,8 @@ use cosmic::iced::runtime::{Action, platform_specific, task};
 use cosmic::iced::window;
 use cosmic::surface::action::{LiveSettings, app_layer_shell, simple_layer_shell, simple_popup};
 use cosmic::widget::menu::menu_column::MenuColumn;
-use cosmic::widget::space::horizontal;
 use cosmic::widget::reorderable_flex_row;
+use cosmic::widget::space::horizontal;
 use cosmic::{
     Element,
     app::{Core, CosmicFlags, Settings, Task},
