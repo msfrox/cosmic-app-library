@@ -3,7 +3,28 @@
 Resume line: *"Continue cosmic-app-library. Read PLAN.md and HANDOFF.md in
 ~/Projects/cosmic-app-library and do the next step."* Start with that dir as cwd.
 
-## Current state (2026-07-19, session 5)
+## Current state (2026-09-21, Sapphire away session `cosmic-toolchain-prep`)
+- **`cargo build`/`cargo test`/`cargo clippy` now run on Sapphire's
+  `claude-code` container** (Debian 12, no cargo or Wayland headers going
+  in) — exact package list and gotchas in
+  `docs/away/sapphire-toolchain.md`, summarized in PLAN.md Phase 16. This
+  was the bulk of the session; useful independent of the feature below.
+- **Phase 16: Home tile reorder** (was BACKLOG). `AppLibraryConfig::home_order`
+  + `app_group::apply_home_order`, `Message::ReorderHome` — extends the
+  existing `move_within`/reorder-strip pattern Favorites and folders already
+  used, rather than inventing a new one. Home's tile also keeps its existing
+  combine-into-folder behaviour (now via the same 3-strip shape as
+  Favorites/folders, which incidentally gives Home tiles the accent
+  combine-hover hint too). 4 new unit tests (20 total, up from 16 — PLAN.md's
+  Phase 15 note of "13" was already stale by the time this session started).
+  `cargo clippy --all-targets` is fully clean (fixed the 2 pre-existing
+  unused-import warnings plus 2 new findings on this toolchain — a redundant
+  closure, two derivable `Default` impls — all mechanical).
+- **Compile- and unit-test-verified only.** This container has no display —
+  Phase 16's drag/drop UI, and everything below from session 5, is
+  **unverified, needs RUBY2**.
+
+## Previous state (2026-07-19, session 5)
 - Phases 0–15 CODE-COMPLETE on `dev`; release build + `cargo test` (5) pass.
   Phases 11–15 are NOT yet owner-verified live — nothing has been installed
   from this session (sudo needs a password in the agent shell).
@@ -61,9 +82,15 @@ Resume line: *"Continue cosmic-app-library. Read PLAN.md and HANDOFF.md in
    **Phases 11–14 (still unverified):** favorites drag strips + drop-to-combine;
    settings page position/columns/rows live-apply + ESC; keyboard row nav after
    a column change; header show/hide togglers.
+   **Phase 16 (new, unverified):** Home tile reorder — drag a Home tile onto
+   the gap beside another → accent bar shows, release reorders, order
+   survives reopen. Dropping on a tile's *centre* in Home should still
+   combine into a new folder (unchanged behaviour, now via the shared strip
+   code — re-check it didn't regress). A never-dragged app should still sit
+   wherever alphabetical order puts it.
 2. Watch PR #389; rebase if upstream moves.
 3. BACKLOG: Phase 9 tight blur region (owner deferred — do this next), dock-pin
-   sync, Home/in-folder app reorder, upstream picks (#378/#153/#386/#381).
+   sync, upstream picks (#378/#153/#386/#381).
 
 ## Gotchas (stable)
 - PKGBUILD builds from GitHub `dev` — push before `makepkg`.
