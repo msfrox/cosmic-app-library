@@ -1,4 +1,3 @@
-cosmic-app-library = COSMIC Alkalmazáskönyvtár
 cosmic-library-home = Kezdőlap
 cosmic-office = Iroda
 cosmic-system = Rendszer
@@ -26,3 +25,7 @@ snap = Snap
 system = Rendszer
 local = Helyi
 nix = Nix
+xdg-title = { app-name }
+xdg-comment = Egy alkalmazásindító a COSMIC asztali környezethez, amely rácsnézetben listázza az összes telepített alkalmazást
+xdg-keywords = App;Alkalmazás;Könyvtár;Indító
+app-name = Alkalmazások

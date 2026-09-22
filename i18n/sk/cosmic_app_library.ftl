@@ -1,4 +1,3 @@
-cosmic-app-library = Knižnica aplikácií COSMIC
 cosmic-library-home = Domov
 cosmic-office = Kancelária
 cosmic-system = Systém

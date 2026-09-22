@@ -1,5 +1,4 @@
 cancel = Скасаваць
-cosmic-app-library = Бібліятэка праграм COSMIC
 cosmic-office = Офіс
 cosmic-system = Сістэма
 cosmic-utilities = Утыліты

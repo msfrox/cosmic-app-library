@@ -24,5 +24,4 @@ pin-to-app-tray = Kinnita rakenduste salve
 remove = Tõsta rakenduste kogu avalehele
 delete-folder = Kas kustutad kausta?
     .msg = Selle kausta kustutamisel tõstetakse rakenduste ikoonid rakenduste kogu avalehele.
-cosmic-app-library = COSMICu rakenduste kogu
 cosmic-library-home = Rakenduste kogu avaleht

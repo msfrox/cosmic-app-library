@@ -1,45 +1,52 @@
 name := 'cosmic-app-library'
-export APPID := 'com.system76.CosmicAppLibrary'
+appid := 'com.system76.CosmicAppLibrary'
+
+export APP_ID := 'com.system76.CosmicAppLibrary'
 
 rootdir := ''
 prefix := '/usr'
 
 base-dir := absolute_path(clean(rootdir / prefix))
-
-export INSTALL_DIR := base-dir / 'share'
-
 cargo-target-dir := env('CARGO_TARGET_DIR', 'target')
+
+mod cargo 'cargo.just'
+
 bin-src := cargo-target-dir / 'release' / name
 bin-dst := base-dir / 'bin' / name
+
+appdata := appid + '.metainfo.xml'
+appdata-dst := base-dir / 'share' / 'appdata' / appdata
+
+desktop := appid + '.desktop'
+desktop-dst := base-dir / 'share' / 'applications' / desktop
+
+icon := appid + '.svg'
+icon-dst := base-dir / 'share' / 'icons' / 'hicolor' / 'scalable' / 'apps' / icon
 
 # Default recipe which runs `just build-release`
 default: build-release
 
 # Runs `cargo clean`
-clean:
-    cargo clean
+clean: cargo::clean
 
 # `cargo clean` and removes vendored dependencies
-clean-dist: clean
-    rm -rf .cargo vendor vendor.tar
+clean-dist: cargo::clean-dist
 
 # Compiles with debug profile
-build-debug *args:
-    cargo build {{args}}
+build-debug *args: (cargo::build-debug args)
 
 # Compiles with release profile
-build-release *args: (build-debug '--release' args)
+build-release *args: (cargo::build-release args)
 
 # Compiles release profile with vendored dependencies
-build-vendored *args: vendor-extract (build-release '--frozen --offline' args)
+build-vendored *args: cargo::vendor-extract
+    LOCKSTEP_XML_PATH="${PWD}/vendor/atspi-common/xml" cargo build --release --frozen --offline {{args}}
 
 # Compiles and runs a standalone instance
-run *args: build-release
-    {{bin-src}} run {{args}}
+run *args: (cargo::run args)
 
 # Runs a clippy check
-check *args:
-    cargo clippy --all-features {{args}} -- -W clippy::pedantic
+check *args: (cargo::check args)
 
 # Runs a clippy check with JSON message format
 check-json: (check '--message-format=json')
@@ -47,26 +54,16 @@ check-json: (check '--message-format=json')
 # Installs files
 install:
     install -Dm0755 {{bin-src}} {{bin-dst}}
-    @just data/install
-    @just data/icons/install
+    install -Dm0644 {{ 'target' / 'xdgen' / desktop }} {{desktop-dst}}
+    install -Dm0644 {{ 'target' / 'xdgen' / appdata }} {{appdata-dst}}
+    install -Dm0644 {{ 'data' / 'icons' / icon }} {{icon-dst}}
 
 # Uninstalls installed files
 uninstall:
-    rm {{bin-dst}}
-    @just data/uninstall
-    @just data/icons/uninstall
+    rm {{bin-dst}} {{desktop-dst}} {{appdata-dst}} {{icon-dst}}
 
 # Vendor dependencies locally
-vendor:
-    mkdir -p .cargo
-    cargo vendor --sync Cargo.toml \
-        | head -n -1 > .cargo/config
-    echo 'directory = "vendor"' >> .cargo/config
-    tar pcf vendor.tar vendor
-    rm -rf vendor
+vendor: cargo::vendor
 
 # Extracts vendored dependencies
-vendor-extract:
-    #!/usr/bin/env sh
-    rm -rf vendor
-    tar pxf vendor.tar
+vendor-extract: cargo::vendor-extract

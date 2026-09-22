@@ -1,7 +1,6 @@
 cancel = Ακύρωση
 rename = Μετονομασία
 delete = Διαγραφή
-cosmic-app-library = Βιβλιοθήκη εφαρμογών COSMIC
 name = Όνομα
 save = Αποθήκευση
 ok = OK
@@ -26,3 +25,7 @@ cosmic-library-home = Αρχική
 remove = Μετακίνηση στην Αρχική
 delete-folder = Διαγραφή φακέλου;
     .msg = Η διαγραφή αυτού του φακέλου θα μετακινήσεις τα εικονίδια των εφαρμογών στην Αρχική.
+xdg-title = { app-name }
+app-name = Εφαρμογές
+xdg-keywords = Εφαρμογή;Πρόγραμμα;Βιβλιοθήκη;Εκκίνηση;App;Application;Library;Launcher
+xdg-comment = Ένα μενού εκκίνησης εφαρμογών για την επιφάνεια εργασίας COSMIC, το οποίο παραθέτει όλες τις εγκατεστημένες εφαρμογές σε πλέγμα

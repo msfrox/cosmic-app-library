@@ -1,4 +1,3 @@
-cosmic-app-library = Biblioteca de aplicații COSMIC
 cosmic-library-home = Acasă
 cosmic-office = Birou
 cosmic-system = Sistem

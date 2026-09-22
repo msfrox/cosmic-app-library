@@ -1,4 +1,3 @@
-cosmic-app-library = Бібліотека застосунків COSMIC
 cosmic-library-home = Бібліотека
 cosmic-office = Офіс
 cosmic-system = Система
@@ -26,3 +25,7 @@ snap = Snap
 system = Система
 local = Локальний
 nix = Nix
+xdg-title = { app-name }
+xdg-comment = Бібліотека застосунків стільниці COSMIC із сітковим розташуванням встановлених програм
+xdg-keywords = Застосунок;Програма;Бібліотека;Запускач;App;Application;Library;Launcher
+app-name = Застосунки

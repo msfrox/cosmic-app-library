@@ -1,4 +1,3 @@
-cosmic-app-library = COSMIC Toepassingskiezer
 cosmic-library-home = Startpagina
 cosmic-office = Kantoor
 cosmic-system = Systeem

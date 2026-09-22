@@ -1,4 +1,3 @@
-cosmic-app-library = ಕಾಸ್ಮಿಕ್ ಅಪ್ಲಿಕೇಶನ್ ಗ್ರಂಥಾಲಯ
 cosmic-library-home = ಗ್ರಂಥಾಲಯದ ಮನೆ
 cosmic-office = ಆಫೀಸ್
 cosmic-system = ಸಿಸ್ಟಮ್
@@ -8,7 +7,7 @@ name = ಹೆಸರು
 ok = ಒಪ್ಪಿಗೆ
 save = ಉಳಿಸಿ
 cancel = ರದ್ದು ಮಾಡಿ
-search-placeholder = ಅಪ್ಲಿಕೇಶನ್‌ಗಳನ್ನು ಹುಡುಕಲು ಟೈಪ್ ಮಾಡಿ...
+search-placeholder = ಅಪ್ಲಿಕೇಶನ್‌ಗಳನ್ನು ಹುಡುಕಲು ಟೈಪ್ ಮಾಡಿ…
 new-group-placeholder = ಫೋಲ್ಡರ್ ಹೆಸರು
 pin-to-app-tray = ಅಪ್ಲಿಕೇಶನ್ ಟ್ರೇಗೆ ಪಿನ್ ಮಾಡಿ
 run = ಕಾರ್ಯಗತಗೊಳಿಸಿ

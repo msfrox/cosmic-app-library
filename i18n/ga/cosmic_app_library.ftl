@@ -1,4 +1,3 @@
-cosmic-app-library = Leabharlann Aipeanna COSMIC
 cosmic-library-home = Baile leabharlainne
 cosmic-office = Oifig
 cosmic-system = Córas
@@ -26,3 +25,4 @@ snap = Snap
 system = Córas
 local = Áitiúil
 nix = Nix
+xdg-title = { app-name }

@@ -1,4 +1,3 @@
-cosmic-app-library = COSMICアプリライブラリ
 cosmic-library-home = ライブラリホーム
 cosmic-office = オフィス
 cosmic-system = システム

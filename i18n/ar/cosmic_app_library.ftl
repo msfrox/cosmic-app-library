@@ -1,4 +1,3 @@
-cosmic-app-library = مكتبة تطبيقات COSMIC
 cosmic-library-home = مكتبة المنزل
 cosmic-office = مكتب
 cosmic-system = النظام

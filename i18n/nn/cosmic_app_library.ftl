@@ -1,6 +1,5 @@
 cosmic-library-home = Heim
 cancel = Avbryt
-cosmic-app-library = COSMIC Appbibliotek
 cosmic-office = Kontor
 cosmic-system = System
 cosmic-utilities = Verktøy

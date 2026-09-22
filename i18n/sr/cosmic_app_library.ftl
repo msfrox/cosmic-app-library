@@ -6,7 +6,6 @@ save = Сачувај
 name = Назив
 delete = Обриши
 rename = Преименуј
-cosmic-app-library = Космик библиотека програма
 cosmic-library-home = Почетна страна библиотеке
 cosmic-office = Канцеларија
 cosmic-system = Систем

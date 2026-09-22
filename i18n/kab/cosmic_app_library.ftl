@@ -1,11 +1,10 @@
-cosmic-app-library = Tamkarḍit n isnasen COSMIC
 cosmic-library-home = Tamkarḍit tagejdant
 cosmic-system = Anagraw
 cosmic-utilities = Ifecka
 new-group = Snulfu-d akaram
 name = Isem
 save = Sekles
-cancel = Sefsex
+cancel = Semmet
 search-placeholder = Aru iwakken ad tnadiḍ isnasen…
 new-group-placeholder = Isem n Ukaram
 pin-to-app-tray = Senteḍ ɣer ufeggag n isnasen

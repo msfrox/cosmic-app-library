@@ -1,4 +1,3 @@
-cosmic-app-library = कास्मिक ऐप लाइब्रेरी
 cosmic-library-home = लाइब्रेरी होम
 cosmic-office = ऑफिस
 cosmic-system = सिस्टम
@@ -17,7 +16,7 @@ run-on-default = (डिफ़ॉल्ट)
 remove = लाइब्रेरी होम पर ले जाएँ
 create-new = नया फ़ोल्डर बनाएँ
 add-group = समूह जोड़ें
-delete = हटाएँ
+delete = हटाएं
 rename = नाम बदलें
 delete-folder = फ़ोल्डर हटाएँ?
     .msg = इस फ़ोल्डर को हटाने से एप्लिकेशन आइकन लाइब्रेरी होम में स्थानांतरित हो जाएगा।

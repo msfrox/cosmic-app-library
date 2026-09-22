@@ -309,12 +309,12 @@ where
                     state.right_press = true;
                     shell.capture_event();
                 }
-                Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Right)) => {
-                    if state.right_press {
-                        shell.publish(self.on_right_release.as_ref()(layout.bounds()));
-                        state.right_press = false;
-                        shell.capture_event();
-                    }
+                Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Right))
+                    if state.right_press =>
+                {
+                    shell.publish(self.on_right_release.as_ref()(layout.bounds()));
+                    state.right_press = false;
+                    shell.capture_event();
                 }
                 _ => {}
             }

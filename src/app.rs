@@ -1256,19 +1256,17 @@ impl cosmic::Application for CosmicAppLibrary {
             }
             Message::Layer(e, id) => {
                 match e {
-                    LayerEvent::Focused => {
-                        if self.menu.is_none() {
-                            if id == SurfaceId::RESERVED {
-                                return text_input::focus(SEARCH_ID.clone()).chain(
-                                    iced_runtime::task::widget(find_focused()).map(|id| {
-                                        cosmic::Action::App(Message::UpdateFocused(Some(id)))
-                                    }),
-                                );
-                            } else if id == *DELETE_GROUP_WINDOW_ID {
-                                return button::focus(SUBMIT_DELETE_ID.clone());
-                            } else if id == *NEW_GROUP_WINDOW_ID {
-                                return text_input::focus(NEW_GROUP_ID.clone());
-                            }
+                    LayerEvent::Focused if self.menu.is_none() => {
+                        if id == SurfaceId::RESERVED {
+                            return text_input::focus(SEARCH_ID.clone()).chain(
+                                iced_runtime::task::widget(find_focused()).map(|id| {
+                                    cosmic::Action::App(Message::UpdateFocused(Some(id)))
+                                }),
+                            );
+                        } else if id == *DELETE_GROUP_WINDOW_ID {
+                            return button::focus(SUBMIT_DELETE_ID.clone());
+                        } else if id == *NEW_GROUP_WINDOW_ID {
+                            return text_input::focus(NEW_GROUP_ID.clone());
                         }
                     }
                     LayerEvent::Unfocused => {

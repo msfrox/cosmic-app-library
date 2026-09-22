@@ -1,4 +1,3 @@
-cosmic-app-library = Biblioteka Aplikacji COSMIC
 cosmic-library-home = Strona Domowa Biblioteki
 cosmic-office = Biuro
 cosmic-system = System
@@ -26,3 +25,7 @@ snap = Snap
 system = System
 local = Lokalny
 nix = Nix
+xdg-title = { app-name }
+xdg-comment = Program startowy dla aplikacji dla środowiska graficznego COSMIC, który pokazuje siatkę ze wszystkimi zainstalowanymi aplikacjami
+xdg-keywords = Apka;Aplikacja;Biblioteka;Start;Startowy
+app-name = Aplikacje
