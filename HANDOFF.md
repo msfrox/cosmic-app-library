@@ -3,7 +3,45 @@
 Resume line: *"Continue cosmic-app-library. Read PLAN.md and HANDOFF.md in
 ~/Projects/cosmic-app-library and do the next step."* Start with that dir as cwd.
 
-## Current state (2026-09-21, Sapphire away session `cosmic-toolchain-prep`)
+## Current state (2026-09-22, Sapphire away session `cosmic-rebase-dev`)
+- **`dev` merged current with `upstream/master`** (25 commits it was behind:
+  xdgen-based localized desktop-entry/appstream generation replacing the old
+  static per-language `.desktop`/`.metainfo.xml` blocks, `justfile` refactored
+  to a `cargo.just` module, toolchain bumped `1.93.0` to `1.95.0`
+  (`rust-toolchain.toml` now also pins `clippy`/`rustfmt` components), version
+  `1.0.12` to `1.9.0`, a `LayerEvent::Focused` match-guard cleanup in `app.rs`,
+  plus a pile of `i18n: translation update` commits). Merge commit `6aa1d4c`
+  on this task's branch (`away/2026-09/cosmic-rebase-dev` — the runner
+  branched it from `master`; reset to `origin/dev` first per the task
+  preamble, then merged `upstream/master` in).
+- **One real conflict, in `src/widgets/application.rs`**: upstream's "Align
+  center for app names" (`d98a389`) added `.align_x(text::Alignment::Center)`
+  to the app-tile name text. Our own `9834aed` ("ellipsize long names") had
+  already superseded that — it uses `.center()`, which iced_core's
+  `Text::center()` impl shows is literally `align_x(Center).align_y(Center)`,
+  plus `Length::Fill`, word wrap and 2-line ellipsis, versus upstream's
+  `Length::Shrink` + x-only centering. **Kept our side entirely** — a strict
+  superset of upstream's change. Every other file (`Cargo.lock`/`.toml`,
+  `app.rs`, the i18n `.ftl` files) auto-merged clean; spot-checked `app.rs`'s
+  auto-merge (cosmetic match-guard refactor, no logic change) and the xdgen
+  data-file changes (upstream's own localization rework, unrelated to
+  anything on `dev`).
+- **Verified post-merge, this container:** `cargo build` clean (no warnings,
+  ~6.5 min cold — the 1.95.0 toolchain auto-installed via `rustup show`, same
+  `sapphire-toolchain.md` recipe, nothing new needed), `cargo test` 20/20 pass
+  (Phase 16 Home-reorder tests included), `cargo clippy --all-targets` clean,
+  `cargo fmt --all -- --check` clean. **Still unverified live** — no display,
+  no Wayland, needs RUBY2, same as every prior session.
+- `dev` (this branch) is now 0 commits behind `upstream/master`, 26 ahead.
+- **`feat/library-position` (PR #389) was NOT touched** — it's a separate
+  branch off `master` for the upstream PR, not `dev`. The task's "PR #389
+  does not rot further" is about keeping `dev` mergeable in general, not
+  about rebasing that submitted PR branch. It's still ~25 commits behind
+  `upstream/master`, same gap `dev` had before this merge — left for a
+  future call, since rewriting a branch a maintainer may already be
+  reviewing wasn't asked for here.
+
+## Previous state (2026-09-21, Sapphire away session `cosmic-toolchain-prep`)
 - **`cargo build`/`cargo test`/`cargo clippy` now run on Sapphire's
   `claude-code` container** (Debian 12, no cargo or Wayland headers going
   in) — exact package list and gotchas in
@@ -88,7 +126,10 @@ Resume line: *"Continue cosmic-app-library. Read PLAN.md and HANDOFF.md in
    combine into a new folder (unchanged behaviour, now via the shared strip
    code — re-check it didn't regress). A never-dragged app should still sit
    wherever alphabetical order puts it.
-2. Watch PR #389; rebase if upstream moves.
+2. `dev` is caught up with `upstream/master` as of 2026-09-22 (see Current
+   state above). Watch for upstream moving again; `feat/library-position`
+   (PR #389) itself is still ~25 commits behind and untouched — owner call on
+   whether/when to rebase a branch already up for review.
 3. BACKLOG: Phase 9 tight blur region (owner deferred — do this next), dock-pin
    sync, upstream picks (#378/#153/#386/#381).
 
